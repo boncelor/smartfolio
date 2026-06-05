@@ -1,5 +1,8 @@
 const { deployProxy } = require("@openzeppelin/truffle-upgrades");
-const Smartfolio = artifacts.require("Smartfolio");
+const Smartfolio      = artifacts.require("Smartfolio");
+const MockERC20       = artifacts.require("MockERC20");
+const MockWETH        = artifacts.require("MockWETH");
+const MockSwapRouter  = artifacts.require("MockSwapRouter");
 
 const BN = web3.utils.BN;
 const toWei = (n, unit = "ether") => web3.utils.toWei(String(n), unit);
@@ -619,6 +622,656 @@ contract("Smartfolio", (accounts) => {
     it("reverts unpause if called by non-owner", async () => {
       await sf.pause({ from: owner });
       await expectRevert(sf.unpause({ from: alice }));
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Portfolio Phase 1 — configuration & infrastructure
+  // ---------------------------------------------------------------------------
+
+  // Dummy ERC20 addresses — real contracts not needed for config-only tests.
+  const TOKEN_A = "0x1111111111111111111111111111111111111111";
+  const TOKEN_B = "0x2222222222222222222222222222222222222222";
+  const ROUTER  = "0x3333333333333333333333333333333333333333";
+  const WETH    = "0x4444444444444444444444444444444444444444";
+
+  const VALID_ASSETS = [
+    { token: TOKEN_A, weightBps: 6000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
+    { token: TOKEN_B, weightBps: 4000, poolFee: 500,  swapPath: "0x", sellSwapPath: "0x" },
+  ];
+
+  describe("setKeeper", () => {
+    it("sets keeper and emits KeeperSet", async () => {
+      const tx = await sf.setKeeper(alice, { from: owner });
+      assert.equal(await sf.keeper(), alice);
+      const log = tx.logs.find((l) => l.event === "KeeperSet");
+      assert.ok(log);
+      assert.equal(log.args.keeper, alice);
+    });
+
+    it("reverts for zero address", async () => {
+      await expectRevert(
+        sf.setKeeper("0x0000000000000000000000000000000000000000", { from: owner }),
+        "zero address"
+      );
+    });
+
+    it("reverts if called by non-owner", async () => {
+      await expectRevert(sf.setKeeper(alice, { from: alice }));
+    });
+  });
+
+  describe("setSwapRouter", () => {
+    it("sets router and emits SwapRouterSet", async () => {
+      const tx = await sf.setSwapRouter(ROUTER, { from: owner });
+      assert.equal((await sf.swapRouter()).toLowerCase(), ROUTER.toLowerCase());
+      const log = tx.logs.find((l) => l.event === "SwapRouterSet");
+      assert.ok(log);
+    });
+
+    it("reverts for zero address", async () => {
+      await expectRevert(
+        sf.setSwapRouter("0x0000000000000000000000000000000000000000", { from: owner }),
+        "zero address"
+      );
+    });
+
+    it("reverts if called by non-owner", async () => {
+      await expectRevert(sf.setSwapRouter(ROUTER, { from: alice }));
+    });
+  });
+
+  describe("setWETH", () => {
+    it("sets WETH and emits WETHSet", async () => {
+      const tx = await sf.setWETH(WETH, { from: owner });
+      assert.equal((await sf.weth()).toLowerCase(), WETH.toLowerCase());
+      const log = tx.logs.find((l) => l.event === "WETHSet");
+      assert.ok(log);
+    });
+
+    it("reverts for zero address", async () => {
+      await expectRevert(
+        sf.setWETH("0x0000000000000000000000000000000000000000", { from: owner }),
+        "zero address"
+      );
+    });
+
+    it("reverts if called by non-owner", async () => {
+      await expectRevert(sf.setWETH(WETH, { from: alice }));
+    });
+  });
+
+  describe("setSlippageTolerance", () => {
+    it("sets tolerance and emits SlippageToleranceSet", async () => {
+      const tx = await sf.setSlippageTolerance(100, { from: owner });
+      assert.equal((await sf.slippageToleranceBps()).toString(), "100");
+      const log = tx.logs.find((l) => l.event === "SlippageToleranceSet");
+      assert.ok(log);
+      assert.equal(log.args.bps.toString(), "100");
+    });
+
+    it("allows setting exactly 1000 bps (10%)", async () => {
+      await sf.setSlippageTolerance(1000, { from: owner });
+      assert.equal((await sf.slippageToleranceBps()).toString(), "1000");
+    });
+
+    it("reverts if bps exceeds 1000", async () => {
+      await expectRevert(
+        sf.setSlippageTolerance(1001, { from: owner }),
+        "slippage exceeds 10%"
+      );
+    });
+
+    it("reverts if called by non-owner", async () => {
+      await expectRevert(sf.setSlippageTolerance(50, { from: alice }));
+    });
+
+    it("defaults to 50 bps after deploy", async () => {
+      assert.equal((await sf.slippageToleranceBps()).toString(), "50");
+    });
+  });
+
+  describe("setPortfolioConfig", () => {
+    it("stores config, marks portfolio inactive, and emits PortfolioConfigSet", async () => {
+      const tx = await sf.setPortfolioConfig(TOKEN_ID, VALID_ASSETS, { from: owner });
+
+      const config = await sf.getPortfolioConfig(TOKEN_ID);
+      assert.equal(config.length, 2);
+      assert.equal(config[0].token.toLowerCase(), TOKEN_A.toLowerCase());
+      assert.equal(config[0].weightBps.toString(), "6000");
+      assert.equal(config[0].poolFee.toString(), "3000");
+      assert.equal(config[1].token.toLowerCase(), TOKEN_B.toLowerCase());
+      assert.equal(config[1].weightBps.toString(), "4000");
+      assert.equal(config[1].poolFee.toString(), "500");
+
+      assert.equal(await sf.portfolioActive(TOKEN_ID), false);
+
+      const log = tx.logs.find((l) => l.event === "PortfolioConfigSet");
+      assert.ok(log);
+      assert.equal(log.args.id.toString(), TOKEN_ID.toString());
+    });
+
+    it("replaces a previous config", async () => {
+      await sf.setPortfolioConfig(TOKEN_ID, VALID_ASSETS, { from: owner });
+      const newAssets = [
+        { token: TOKEN_A, weightBps: 10000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
+      ];
+      await sf.setPortfolioConfig(TOKEN_ID, newAssets, { from: owner });
+      const config = await sf.getPortfolioConfig(TOKEN_ID);
+      assert.equal(config.length, 1);
+      assert.equal(config[0].weightBps.toString(), "10000");
+    });
+
+    it("reverts if weights do not sum to 10000", async () => {
+      const bad = [
+        { token: TOKEN_A, weightBps: 6000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
+        { token: TOKEN_B, weightBps: 3000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" }, // sum = 9000
+      ];
+      await expectRevert(
+        sf.setPortfolioConfig(TOKEN_ID, bad, { from: owner }),
+        "weights must sum to 10000"
+      );
+    });
+
+    it("reverts if a weight is zero", async () => {
+      const bad = [
+        { token: TOKEN_A, weightBps: 0,     poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
+        { token: TOKEN_B, weightBps: 10000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
+      ];
+      await expectRevert(
+        sf.setPortfolioConfig(TOKEN_ID, bad, { from: owner }),
+        "zero weight"
+      );
+    });
+
+    it("reverts if a token address is zero", async () => {
+      const bad = [
+        {
+          token: "0x0000000000000000000000000000000000000000",
+          weightBps: 10000,
+          poolFee: 3000,
+          swapPath: "0x",
+          sellSwapPath: "0x",
+        },
+      ];
+      await expectRevert(
+        sf.setPortfolioConfig(TOKEN_ID, bad, { from: owner }),
+        "zero token address"
+      );
+    });
+
+    it("reverts for an invalid pool fee tier", async () => {
+      const bad = [
+        { token: TOKEN_A, weightBps: 10000, poolFee: 1234, swapPath: "0x", sellSwapPath: "0x" },
+      ];
+      await expectRevert(
+        sf.setPortfolioConfig(TOKEN_ID, bad, { from: owner }),
+        "invalid pool fee"
+      );
+    });
+
+    it("accepts all three valid pool fee tiers", async () => {
+      for (const fee of [500, 3000, 10000]) {
+        const assets = [{ token: TOKEN_A, weightBps: 10000, poolFee: fee, swapPath: "0x", sellSwapPath: "0x" }];
+        await sf.setPortfolioConfig(TOKEN_ID, assets, { from: owner });
+        const config = await sf.getPortfolioConfig(TOKEN_ID);
+        assert.equal(config[0].poolFee.toString(), fee.toString());
+      }
+    });
+
+    it("reverts if no assets provided", async () => {
+      await expectRevert(
+        sf.setPortfolioConfig(TOKEN_ID, [], { from: owner }),
+        "no assets provided"
+      );
+    });
+
+    it("reverts if called by non-owner", async () => {
+      await expectRevert(sf.setPortfolioConfig(TOKEN_ID, VALID_ASSETS, { from: alice }));
+    });
+
+    it("reverts if portfolio is already active", async () => {
+      // We'll test this after deploy is available — placeholder skipped for now.
+      // Covered in the deploy suite below.
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Portfolio Phase 2 — deploy & rebalance
+  // ---------------------------------------------------------------------------
+
+  contract("Smartfolio — portfolio Phase 2", (accounts) => {
+    const [owner, alice, keeper] = accounts;
+
+    let sf, tokenA, tokenB, mockWETH, mockRouter;
+
+    // Portfolio: 60% tokenA (poolFee 3000), 40% tokenB (poolFee 500)
+    const buildAssets = (addrA, addrB) => [
+      { token: addrA, weightBps: 6000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
+      { token: addrB, weightBps: 4000, poolFee: 500,  swapPath: "0x", sellSwapPath: "0x" },
+    ];
+
+    beforeEach(async () => {
+      // Deploy contracts
+      sf         = await deployProxy(Smartfolio, [owner], { kind: "uups" });
+      tokenA     = await MockERC20.new("Token A", "TKA");
+      tokenB     = await MockERC20.new("Token B", "TKB");
+      mockWETH   = await MockWETH.new();
+      mockRouter = await MockSwapRouter.new();
+
+      // Fund router with tokens so it can fulfil swaps
+      await tokenA.mint(mockRouter.address, toWei("10000"));
+      await tokenB.mint(mockRouter.address, toWei("10000"));
+      // Fund router with WETH so it can fulfil token→WETH sells in rebalance.
+      // Reserve is only 0.01 ETH so 0.1 ETH of WETH is ample.
+      await mockWETH.deposit({ value: toWei("0.1"), from: owner });
+      await mockWETH.transfer(mockRouter.address, toWei("0.1"), { from: owner });
+
+      // Configure Smartfolio
+      await sf.setKeeper(keeper, { from: owner });
+      await sf.setSwapRouter(mockRouter.address, { from: owner });
+      await sf.setWETH(mockWETH.address, { from: owner });
+
+      // Set tiers and portfolio config for TOKEN_ID
+      await sf.setTiers(TOKEN_ID, TIERS, { from: owner });
+      await sf.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address), { from: owner });
+
+      // Alice mints 10 tokens (10 × 0.001 ETH = 0.01 ETH in reserve)
+      const cost = await sf.mintCost(TOKEN_ID, 10);
+      await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: cost });
+    });
+
+    // ---- deploy ----
+
+    describe("deploy", () => {
+      it("zeroes reserve, sets portfolioActive, sets deployedEth, updates holdings, emits Deployed", async () => {
+        const reserveBefore = await sf.reserve(TOKEN_ID);
+        assert.ok(new BN(reserveBefore).gt(new BN(0)), "reserve must be > 0 before deploy");
+
+        const tx = await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
+
+        // Reserve cleared
+        assert.equal((await sf.reserve(TOKEN_ID)).toString(), "0");
+
+        // Portfolio marked active
+        assert.equal(await sf.portfolioActive(TOKEN_ID), true);
+
+        // deployedEth records original reserve
+        assert.equal((await sf.deployedEth(TOKEN_ID)).toString(), reserveBefore.toString());
+
+        // portfolioHoldings updated — MockSwapRouter is 1:1, so
+        // tokenA gets 60% of reserve, tokenB gets remainder (40%)
+        const expectedA = new BN(reserveBefore).muln(6000).divn(10000);
+        const expectedB = new BN(reserveBefore).sub(expectedA); // remainder
+        assert.equal(
+          (await sf.portfolioHoldings(TOKEN_ID, tokenA.address)).toString(),
+          expectedA.toString()
+        );
+        assert.equal(
+          (await sf.portfolioHoldings(TOKEN_ID, tokenB.address)).toString(),
+          expectedB.toString()
+        );
+
+        const log = tx.logs.find((l) => l.event === "Deployed");
+        assert.ok(log);
+        assert.equal(log.args.id.toString(), TOKEN_ID.toString());
+        assert.equal(log.args.ethDeployed.toString(), reserveBefore.toString());
+      });
+
+      it("reverts if already deployed", async () => {
+        await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
+        await expectRevert(sf.deploy(TOKEN_ID, [0, 0], { from: keeper }), "already deployed");
+      });
+
+      it("reverts if no portfolio config", async () => {
+        const OTHER_ID = 42;
+        await sf.setTiers(OTHER_ID, TIERS, { from: owner });
+        const cost = await sf.mintCost(OTHER_ID, 1);
+        await sf.mint(alice, OTHER_ID, 1, "0x", { from: alice, value: cost });
+        await expectRevert(sf.deploy(OTHER_ID, [], { from: keeper }), "no portfolio config");
+      });
+
+      it("reverts if no reserve", async () => {
+        // Deploy once to drain reserve
+        await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
+        // Try to deploy a fresh token ID that has a config but no reserve
+        const OTHER_ID = 43;
+        await sf.setTiers(OTHER_ID, TIERS, { from: owner });
+        await sf.setPortfolioConfig(OTHER_ID, buildAssets(tokenA.address, tokenB.address), { from: owner });
+        await expectRevert(sf.deploy(OTHER_ID, [0, 0], { from: keeper }), "no reserve to deploy");
+      });
+
+      it("reverts if amountsOutMinimum length mismatches config", async () => {
+        await expectRevert(
+          sf.deploy(TOKEN_ID, [0], { from: keeper }), // config has 2 assets, only 1 min
+          "length mismatch"
+        );
+      });
+
+      it("reverts if called by non-keeper", async () => {
+        await expectRevert(sf.deploy(TOKEN_ID, [0, 0], { from: alice }), "not keeper");
+      });
+
+      it("reverts if router is not set", async () => {
+        const sf2 = await deployProxy(Smartfolio, [owner], { kind: "uups" });
+        await sf2.setTiers(TOKEN_ID, TIERS, { from: owner });
+        await sf2.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address), { from: owner });
+        await sf2.setKeeper(keeper, { from: owner });
+        await sf2.setWETH(mockWETH.address, { from: owner });
+        const cost = await sf2.mintCost(TOKEN_ID, 1);
+        await sf2.mint(alice, TOKEN_ID, 1, "0x", { from: alice, value: cost });
+        await expectRevert(sf2.deploy(TOKEN_ID, [0, 0], { from: keeper }), "router not set");
+      });
+
+      it("blocks setPortfolioConfig once portfolio is active", async () => {
+        await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
+        await expectRevert(
+          sf.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address), { from: owner }),
+          "portfolio is active"
+        );
+      });
+
+      it("blocks burn() when portfolio is active", async () => {
+        await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
+        await expectRevert(
+          sf.burn(TOKEN_ID, 1, { from: alice }),
+          "use divest()"
+        );
+      });
+    });
+
+    // ---- rebalance ----
+
+    describe("rebalance", () => {
+      beforeEach(async () => {
+        // Deploy portfolio first
+        await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
+      });
+
+      it("executes a sell + buy pair and updates holdings, emits Rebalanced", async () => {
+        const holdingABefore = new BN(await sf.portfolioHoldings(TOKEN_ID, tokenA.address));
+        const holdingBBefore = new BN(await sf.portfolioHoldings(TOKEN_ID, tokenB.address));
+
+        // Sell 10% of tokenA → WETH, then buy equivalent WETH → tokenB
+        const sellAmount = holdingABefore.divn(10);
+
+        const instructions = [
+          { token: tokenA.address, isSell: true,  amountIn: sellAmount.toString(), amountOutMin: 0, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
+          { token: tokenB.address, isSell: false, amountIn: sellAmount.toString(), amountOutMin: 0, poolFee: 500,  swapPath: "0x" },
+        ];
+
+        const tx = await sf.rebalance(TOKEN_ID, instructions, { from: keeper });
+
+        const holdingAAfter = new BN(await sf.portfolioHoldings(TOKEN_ID, tokenA.address));
+        const holdingBAfter = new BN(await sf.portfolioHoldings(TOKEN_ID, tokenB.address));
+
+        // tokenA decreased by sellAmount
+        assert.equal(holdingAAfter.toString(), holdingABefore.sub(sellAmount).toString());
+        // tokenB increased by sellAmount (1:1 mock rate)
+        assert.equal(holdingBAfter.toString(), holdingBBefore.add(sellAmount).toString());
+
+        const log = tx.logs.find((l) => l.event === "Rebalanced");
+        assert.ok(log);
+        assert.equal(log.args.id.toString(), TOKEN_ID.toString());
+      });
+
+      it("reverts sell if holdings are insufficient", async () => {
+        const holding = new BN(await sf.portfolioHoldings(TOKEN_ID, tokenA.address));
+        const instructions = [
+          { token: tokenA.address, isSell: true, amountIn: holding.addn(1).toString(), amountOutMin: 0, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
+        ];
+        await expectRevert(sf.rebalance(TOKEN_ID, instructions, { from: keeper }), "insufficient holdings");
+      });
+
+      it("reverts if portfolio is not active", async () => {
+        const OTHER_ID = 44;
+        await sf.setTiers(OTHER_ID, TIERS, { from: owner });
+        await sf.setPortfolioConfig(OTHER_ID, buildAssets(tokenA.address, tokenB.address), { from: owner });
+        const instructions = [
+          { token: tokenA.address, isSell: true, amountIn: 1, amountOutMin: 0, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
+        ];
+        await expectRevert(sf.rebalance(OTHER_ID, instructions, { from: keeper }), "portfolio not active");
+      });
+
+      it("reverts with empty instructions", async () => {
+        await expectRevert(sf.rebalance(TOKEN_ID, [], { from: keeper }), "no instructions");
+      });
+
+      it("reverts if called by non-keeper", async () => {
+        const instructions = [
+          { token: tokenA.address, isSell: true, amountIn: 1, amountOutMin: 0, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
+        ];
+        await expectRevert(sf.rebalance(TOKEN_ID, instructions, { from: alice }), "not keeper");
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Portfolio Phase 3 — divest (fee-free exit)
+  // ---------------------------------------------------------------------------
+
+  contract("Smartfolio — portfolio Phase 3", (accounts) => {
+    const [owner, alice, bob, keeper] = accounts;
+
+    let sf, tokenA, tokenB, mockWETH, mockRouter;
+
+    const buildAssets = (addrA, addrB) => [
+      { token: addrA, weightBps: 6000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
+      { token: addrB, weightBps: 4000, poolFee: 500,  swapPath: "0x", sellSwapPath: "0x" },
+    ];
+
+    beforeEach(async () => {
+      sf         = await deployProxy(Smartfolio, [owner], { kind: "uups" });
+      tokenA     = await MockERC20.new("Token A", "TKA");
+      tokenB     = await MockERC20.new("Token B", "TKB");
+      mockWETH   = await MockWETH.new();
+      mockRouter = await MockSwapRouter.new();
+
+      // Fund router: ERC20s for buys and WETH for sells
+      await tokenA.mint(mockRouter.address, toWei("10000"));
+      await tokenB.mint(mockRouter.address, toWei("10000"));
+      await mockWETH.deposit({ value: toWei("0.1"), from: owner });
+      await mockWETH.transfer(mockRouter.address, toWei("0.1"), { from: owner });
+
+      await sf.setKeeper(keeper, { from: owner });
+      await sf.setSwapRouter(mockRouter.address, { from: owner });
+      await sf.setWETH(mockWETH.address, { from: owner });
+
+      await sf.setTiers(TOKEN_ID, TIERS, { from: owner });
+      await sf.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address), { from: owner });
+
+      // Alice mints 100 tokens → 0.1 ETH in reserve
+      const cost = await sf.mintCost(TOKEN_ID, 100);
+      await sf.mint(alice, TOKEN_ID, 100, "0x", { from: alice, value: cost });
+
+      // Deploy portfolio
+      await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
+    });
+
+    // ---- helpers ----
+
+    // Expected token amounts held after deploy (1:1 mock rate):
+    //   tokenA = 60% of reserve, tokenB = remainder (40%)
+    async function expectedHoldings(reserveAmount) {
+      const a = new BN(reserveAmount).muln(6000).divn(10000);
+      const b = new BN(reserveAmount).sub(a);
+      return { a, b };
+    }
+
+    describe("divest", () => {
+      it("burns tokens, sells ERC20s, returns ETH, emits Divested", async () => {
+        const deployedAmount = await sf.deployedEth(TOKEN_ID);
+        const { a: holdingA, b: holdingB } = await expectedHoldings(deployedAmount);
+
+        const supplyBefore = await sf.totalSupply(TOKEN_ID);
+        const ethBefore    = new BN(await web3.eth.getBalance(alice));
+
+        // Divest half (50 of 100 tokens)
+        const tx = await sf.divest(TOKEN_ID, 50, 0, { from: alice });
+        const gasUsed  = new BN(tx.receipt.gasUsed);
+        const gasPrice = new BN(tx.receipt.effectiveGasPrice || (await web3.eth.getGasPrice()));
+
+        const supplyAfter = await sf.totalSupply(TOKEN_ID);
+        const ethAfter    = new BN(await web3.eth.getBalance(alice));
+
+        // Supply reduced
+        assert.equal(supplyAfter.toString(), new BN(supplyBefore).subn(50).toString());
+
+        // ERC1155 balance reduced
+        assert.equal((await sf.balanceOf(alice, TOKEN_ID)).toString(), "50");
+
+        // Holdings reduced by 50%
+        assert.equal(
+          (await sf.portfolioHoldings(TOKEN_ID, tokenA.address)).toString(),
+          holdingA.divn(2).toString()
+        );
+        assert.equal(
+          (await sf.portfolioHoldings(TOKEN_ID, tokenB.address)).toString(),
+          holdingB.divn(2).toString()
+        );
+
+        // Alice received ETH (net of gas)
+        const ethReceived = ethAfter.sub(ethBefore).add(gasUsed.mul(gasPrice));
+        assert.ok(ethReceived.gt(new BN(0)), "Alice should receive ETH");
+
+        // Event
+        const log = tx.logs.find((l) => l.event === "Divested");
+        assert.ok(log);
+        assert.equal(log.args.account, alice);
+        assert.equal(log.args.id.toString(), TOKEN_ID.toString());
+        assert.equal(log.args.amount.toString(), "50");
+        assert.equal(log.args.ethReceived.toString(), ethReceived.toString());
+      });
+
+      it("full divest: all tokens burned, portfolioActive resets to false", async () => {
+        await sf.divest(TOKEN_ID, 100, 0, { from: alice });
+
+        assert.equal((await sf.totalSupply(TOKEN_ID)).toString(), "0");
+        assert.equal((await sf.balanceOf(alice, TOKEN_ID)).toString(), "0");
+        assert.equal(await sf.portfolioActive(TOKEN_ID), false);
+
+        // Holdings cleared
+        assert.equal(
+          (await sf.portfolioHoldings(TOKEN_ID, tokenA.address)).toString(), "0"
+        );
+        assert.equal(
+          (await sf.portfolioHoldings(TOKEN_ID, tokenB.address)).toString(), "0"
+        );
+      });
+
+      it("after full divest owner can reconfigure and redeploy", async () => {
+        await sf.divest(TOKEN_ID, 100, 0, { from: alice });
+
+        // Can set new config now that portfolio is inactive
+        await sf.setPortfolioConfig(
+          TOKEN_ID,
+          buildAssets(tokenA.address, tokenB.address),
+          { from: owner }
+        );
+
+        // Bob mints and redeploys
+        const cost = await sf.mintCost(TOKEN_ID, 10);
+        await sf.mint(bob, TOKEN_ID, 10, "0x", { from: bob, value: cost });
+        await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
+
+        assert.equal(await sf.portfolioActive(TOKEN_ID), true);
+      });
+
+      it("multiple holders divesting proportionally does not affect each other", async () => {
+        // Bob also mints 100 tokens — now total supply is 200
+        const cost = await sf.mintCost(TOKEN_ID, 100);
+        // Need to undeploy for Bob to add to reserve... actually portfolio is active
+        // so Bob can still mint (mint adds to reserve, does not go to portfolio automatically)
+        await sf.mint(bob, TOKEN_ID, 100, "0x", { from: bob, value: cost });
+
+        const holdingABefore = new BN(await sf.portfolioHoldings(TOKEN_ID, tokenA.address));
+        const supply = new BN(await sf.totalSupply(TOKEN_ID)); // 200
+
+        // Alice divests her 100 (50% of supply)
+        await sf.divest(TOKEN_ID, 100, 0, { from: alice });
+
+        const holdingAAfter = new BN(await sf.portfolioHoldings(TOKEN_ID, tokenA.address));
+        // tokenA holdings should have decreased by 50%
+        assert.equal(
+          holdingAAfter.toString(),
+          holdingABefore.mul(new BN(supply.subn(100))).div(supply).toString()
+        );
+
+        // Bob's balance untouched
+        assert.equal((await sf.balanceOf(bob, TOKEN_ID)).toString(), "100");
+      });
+
+      it("receives ETH equal to sold ERC20 value (1:1 mock rate)", async () => {
+        const deployedAmount = await sf.deployedEth(TOKEN_ID);
+        // 1:1 rate: total ETH received ≈ deployedAmount (minus any rounding)
+        const ethBefore = new BN(await web3.eth.getBalance(alice));
+        const tx = await sf.divest(TOKEN_ID, 100, 0, { from: alice });
+        const gasUsed  = new BN(tx.receipt.gasUsed);
+        const gasPrice = new BN(tx.receipt.effectiveGasPrice || (await web3.eth.getGasPrice()));
+        const ethAfter = new BN(await web3.eth.getBalance(alice));
+        const received = ethAfter.sub(ethBefore).add(gasUsed.mul(gasPrice));
+        // Should be very close to deployedAmount (within 2 wei of rounding)
+        const diff = new BN(deployedAmount).sub(received).abs();
+        assert.ok(diff.lten(2), `Expected ~${deployedAmount} ETH, got ${received}`);
+      });
+
+      it("reverts if minEthOut is not met", async () => {
+        const deployedAmount = await sf.deployedEth(TOKEN_ID);
+        // Demand more ETH than the portfolio is worth
+        const tooMuch = new BN(deployedAmount).muln(10);
+        await expectRevert(
+          sf.divest(TOKEN_ID, 100, tooMuch, { from: alice }),
+          "insufficient ETH out"
+        );
+      });
+
+      it("reverts if portfolio is not active", async () => {
+        // Deploy a fresh token ID that has never been deployed
+        const OTHER_ID = 50;
+        await sf.setTiers(OTHER_ID, TIERS, { from: owner });
+        await sf.setPortfolioConfig(
+          OTHER_ID,
+          buildAssets(tokenA.address, tokenB.address),
+          { from: owner }
+        );
+        const cost = await sf.mintCost(OTHER_ID, 1);
+        await sf.mint(alice, OTHER_ID, 1, "0x", { from: alice, value: cost });
+        await expectRevert(
+          sf.divest(OTHER_ID, 1, 0, { from: alice }),
+          "portfolio not active"
+        );
+      });
+
+      it("reverts if balance is insufficient", async () => {
+        await expectRevert(
+          sf.divest(TOKEN_ID, 101, 0, { from: alice }),
+          "insufficient balance"
+        );
+      });
+
+      it("reverts if amount is zero", async () => {
+        await expectRevert(
+          sf.divest(TOKEN_ID, 0, 0, { from: alice }),
+          "amount must be > 0"
+        );
+      });
+
+      it("reverts when paused", async () => {
+        await sf.pause({ from: owner });
+        await expectRevert(sf.divest(TOKEN_ID, 1, 0, { from: alice }), "EnforcedPause");
+      });
+
+      it("deployedEth decreases proportionally", async () => {
+        const deployedBefore = new BN(await sf.deployedEth(TOKEN_ID));
+        await sf.divest(TOKEN_ID, 50, 0, { from: alice }); // 50% exit
+        const deployedAfter = new BN(await sf.deployedEth(TOKEN_ID));
+        // Should be ~50% of original (within 1 wei rounding)
+        const expected = deployedBefore.divn(2);
+        assert.ok(
+          deployedAfter.sub(expected).abs().lten(1),
+          `deployedEth should halve; got ${deployedAfter}, expected ~${expected}`
+        );
+      });
     });
   });
 });

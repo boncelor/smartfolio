@@ -14,5 +14,9 @@
     "@openzeppelin/contracts-upgradeable": "^5.6.1",
     "@openzeppelin/truffle-upgrades": "^1.21.0",
     "truffle": "^5.11.5"
+  },
+  "dependencies": {
+    "@uniswap/v3-core": "^1.0.1",
+    "@uniswap/v3-periphery": "^1.4.4"
   }
 }
