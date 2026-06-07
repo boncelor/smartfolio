@@ -116,6 +116,18 @@ contract Smartfolio is
         _delegateTo(creditMarketFacet);
     }
 
+    function leverUp(uint256 id, uint256 stableToBorrow, uint256 minWethOut, uint24 poolFee, bytes calldata swapPath)
+        external onlyKeeper nonReentrant
+    {
+        _delegateTo(creditMarketFacet);
+    }
+
+    function leverDown(uint256 id, uint256 wethToWithdraw, uint256 minStableOut, uint24 poolFee, bytes calldata swapPath)
+        external onlyKeeper nonReentrant
+    {
+        _delegateTo(creditMarketFacet);
+    }
+
     function deploy(uint256 id, uint256[] calldata amountsOutMinimum)
         external onlyKeeper nonReentrant
     {
@@ -314,6 +326,21 @@ contract Smartfolio is
 
     function getPortfolioConfig(uint256 id) external view returns (PortfolioAsset[] memory) {
         return _getPortfolioConfig(id);
+    }
+
+    /**
+     * @notice Returns the current contract-level LTV in basis points from Aave's oracle.
+     * @dev    Reads the aggregate position of the Smartfolio proxy across all leverage IDs.
+     *         Returns 0 if there is no collateral yet.
+     */
+    function checkLtv(uint256 id) external view returns (uint256 ltvBps) {
+        if (!isLeverageToken[id]) revert NotLeverageToken();
+        if (aaveCollateral[id] == 0) return 0;
+        LeverageConfig storage cfg = leverageConfig[id];
+        (uint256 totalCollateralBase, uint256 totalDebtBase, , , , ) =
+            IAavePool(cfg.aavePool).getUserAccountData(address(this));
+        if (totalCollateralBase == 0) return 0;
+        return (totalDebtBase * 10_000) / totalCollateralBase;
     }
 
     function getLeverageInfo(uint256 id) external view returns (LeverageInfo memory info) {

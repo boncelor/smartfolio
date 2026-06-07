@@ -1658,3 +1658,292 @@ contract("Smartfolio — leverage Phase 1", (accounts) => {
     });
   });
 });
+
+// =============================================================================
+// Leverage Phase 2 — signal-driven keeper operations
+// =============================================================================
+
+contract("Smartfolio — leverage Phase 2", (accounts) => {
+  const [owner, keeperAccount, alice] = accounts;
+
+  const LEV_ID = 10;
+
+  // Single-tier for simplicity: 0.001 ETH per token, 100 tokens minted = 0.1 ETH collateral
+  const LEV_TIERS = [
+    { threshold: 0, pricePerToken: toWei("0.001") },
+  ];
+
+  const makeLevCfg = (pool, stable) => ({
+    aavePool:     pool,
+    stableToken:  stable,
+    targetLtvBps: 500,
+    maxLtvBps:    1000,
+  });
+
+  let sf, mockWETH, mockAavePool, mockStable, mockRouter;
+  let mintCost100; // cost to mint 100 leverage tokens
+
+  beforeEach(async () => {
+    const tFacet = await SmartfolioTreasury.new();
+    const mFacet = await SmartfolioMarket.new();
+    const cFacet = await SmartfolioCreditMarket.new();
+    sf = await deployProxy(
+      Smartfolio,
+      [owner, tFacet.address, mFacet.address, cFacet.address],
+      { kind: "uups" }
+    );
+
+    mockWETH   = await MockWETH.new();
+    mockStable = await MockERC20.new("USD Coin", "USDC");
+    mockAavePool = await MockAavePool.new();
+    mockRouter   = await MockSwapRouter.new();
+
+    await sf.setWETH(mockWETH.address,             { from: owner });
+    await sf.setSwapRouter(mockRouter.address,      { from: owner });
+    await sf.setKeeper(keeperAccount,               { from: owner });
+    await sf.setTiers(LEV_ID, LEV_TIERS,            { from: owner });
+    await sf.setLeverageConfig(LEV_ID, makeLevCfg(mockAavePool.address, mockStable.address), { from: owner });
+
+    // Alice mints 100 leverage tokens → 0.1 ETH → Aave as WETH collateral
+    mintCost100 = await sf.mintCost(LEV_ID, 100);
+    await sf.mintLeverage(LEV_ID, 100, "0x", { from: alice, value: mintCost100 });
+
+    // Pre-fund MockAavePool with stable so it can lend via borrow()
+    await mockStable.mint(mockAavePool.address, toWei("10"));
+
+    // Pre-fund MockSwapRouter with WETH for leverUp (stable→WETH swap)
+    await mockWETH.deposit({ value: toWei("1"), from: owner });
+    await mockWETH.transfer(mockRouter.address, toWei("1"), { from: owner });
+
+    // Pre-fund MockSwapRouter with stable for leverDown (WETH→stable swap)
+    await mockStable.mint(mockRouter.address, toWei("10"));
+  });
+
+  // ---------------------------------------------------------------------------
+  // leverUp
+  // ---------------------------------------------------------------------------
+
+  describe("leverUp", () => {
+    it("borrows stable, swaps to WETH, re-deposits, updates aaveDebt and aaveCollateral, emits LeverUp", async () => {
+      const collBefore = new BN(await sf.aaveCollateral(LEV_ID));
+      const debtBefore = new BN(await sf.aaveDebt(LEV_ID));
+      assert.equal(debtBefore.toString(), "0");
+
+      const stableToBorrow = new BN(toWei("0.001")); // tiny: ~1% of 0.1 ETH collateral
+      const tx = await sf.leverUp(LEV_ID, stableToBorrow, 0, 3000, "0x", { from: keeperAccount });
+
+      const collAfter = new BN(await sf.aaveCollateral(LEV_ID));
+      const debtAfter = new BN(await sf.aaveDebt(LEV_ID));
+
+      // aaveDebt should equal stableToBorrow (1:1 mock, no interest)
+      assert.equal(debtAfter.toString(), stableToBorrow.toString());
+      // aaveCollateral should have increased (WETH received from swap re-deposited)
+      assert.ok(collAfter.gt(collBefore), "aaveCollateral should increase after leverUp");
+
+      const ev = tx.logs.find(l => l.event === "LeverUp");
+      assert.ok(ev, "LeverUp event not emitted");
+      assert.equal(ev.args.id.toString(), String(LEV_ID));
+      assert.equal(ev.args.stableBorrowed.toString(), stableToBorrow.toString());
+      assert.ok(new BN(ev.args.wethAdded).gt(new BN(0)), "wethAdded should be > 0");
+    });
+
+    it("checkLtv returns non-zero bps after leverUp", async () => {
+      const ltvBefore = await sf.checkLtv(LEV_ID);
+      assert.equal(ltvBefore.toString(), "0");
+
+      await sf.leverUp(LEV_ID, new BN(toWei("0.001")), 0, 3000, "0x", { from: keeperAccount });
+
+      const ltvAfter = await sf.checkLtv(LEV_ID);
+      assert.ok(new BN(ltvAfter).gt(new BN(0)), "LTV should be > 0 after leverUp");
+      assert.ok(new BN(ltvAfter).lte(new BN(1000)), "LTV should be within maxLtvBps");
+    });
+
+    it("getLeverageInfo.ltvBps increases after leverUp", async () => {
+      await sf.leverUp(LEV_ID, new BN(toWei("0.001")), 0, 3000, "0x", { from: keeperAccount });
+      const info = await sf.getLeverageInfo(LEV_ID);
+      assert.ok(new BN(info.ltvBps).gt(new BN(0)));
+      assert.ok(new BN(info.debtStable).gt(new BN(0)));
+    });
+
+    it("reverts if resulting LTV exceeds maxLtvBps (10%)", async () => {
+      // Borrowing 0.05 ETH worth of stable with 0.1 ETH collateral → ~33% LTV after re-deposit
+      // After swap + re-deposit: collateral=0.15, debt=0.05 → LTV≈33%, well over 10%
+      await expectRevert(
+        sf.leverUp(LEV_ID, new BN(toWei("0.05")), 0, 3000, "0x", { from: keeperAccount }),
+        "LTV cap exceeded"
+      );
+    });
+
+    it("reverts if stableToBorrow is zero", async () => {
+      await expectRevert(
+        sf.leverUp(LEV_ID, 0, 0, 3000, "0x", { from: keeperAccount }),
+        "amount must be > 0"
+      );
+    });
+
+    it("reverts if not a leverage token", async () => {
+      await expectRevert(
+        sf.leverUp(999, new BN(toWei("0.001")), 0, 3000, "0x", { from: keeperAccount }),
+        "not a leverage token"
+      );
+    });
+
+    it("reverts if called by non-keeper", async () => {
+      await expectRevert(
+        sf.leverUp(LEV_ID, new BN(toWei("0.001")), 0, 3000, "0x", { from: alice }),
+        "not keeper"
+      );
+    });
+
+    it("reverts if no collateral (no leverage position)", async () => {
+      // Use a different token ID with no minted tokens
+      await sf.setTiers(99, LEV_TIERS, { from: owner });
+      await sf.setLeverageConfig(99, makeLevCfg(mockAavePool.address, mockStable.address), { from: owner });
+      await expectRevert(
+        sf.leverUp(99, new BN(toWei("0.001")), 0, 3000, "0x", { from: keeperAccount }),
+        "no leverage position"
+      );
+    });
+
+    it("multiple leverUp calls compound the position", async () => {
+      const small = new BN(toWei("0.001"));
+      await sf.leverUp(LEV_ID, small, 0, 3000, "0x", { from: keeperAccount });
+      const debtMid = new BN(await sf.aaveDebt(LEV_ID));
+
+      await sf.leverUp(LEV_ID, small, 0, 3000, "0x", { from: keeperAccount });
+      const debtFinal = new BN(await sf.aaveDebt(LEV_ID));
+
+      // Debt should be ~2× after two equal leverUps
+      assert.ok(debtFinal.sub(debtMid).sub(small).abs().lten(1));
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // leverDown
+  // ---------------------------------------------------------------------------
+
+  describe("leverDown", () => {
+    const borrowAmount = new BN(toWei("0.001"));
+
+    beforeEach(async () => {
+      // Establish a leveraged position first
+      await sf.leverUp(LEV_ID, borrowAmount, 0, 3000, "0x", { from: keeperAccount });
+    });
+
+    it("withdraws WETH, swaps to stable, repays debt, updates state, emits LeverDown", async () => {
+      const collBefore = new BN(await sf.aaveCollateral(LEV_ID));
+      const debtBefore = new BN(await sf.aaveDebt(LEV_ID));
+
+      // Withdraw same WETH that was added in leverUp (1:1 swap rate)
+      const wethToWithdraw = borrowAmount; // borrowAmount of stable → same WETH at 1:1
+      const tx = await sf.leverDown(LEV_ID, wethToWithdraw, 0, 3000, "0x", { from: keeperAccount });
+
+      const collAfter = new BN(await sf.aaveCollateral(LEV_ID));
+      const debtAfter = new BN(await sf.aaveDebt(LEV_ID));
+
+      assert.ok(collAfter.lt(collBefore), "collateral should decrease after leverDown");
+      assert.ok(debtAfter.lt(debtBefore), "debt should decrease after leverDown");
+
+      const ev = tx.logs.find(l => l.event === "LeverDown");
+      assert.ok(ev, "LeverDown event not emitted");
+      assert.equal(ev.args.id.toString(), String(LEV_ID));
+      assert.ok(new BN(ev.args.stableRepaid).gt(new BN(0)));
+      assert.ok(new BN(ev.args.wethWithdrawn).gt(new BN(0)));
+    });
+
+    it("full leverDown: aaveDebt reaches 0 and divestLeverage succeeds", async () => {
+      // Withdraw exactly the WETH added during leverUp → full repayment
+      await sf.leverDown(LEV_ID, borrowAmount, 0, 3000, "0x", { from: keeperAccount });
+
+      assert.equal((await sf.aaveDebt(LEV_ID)).toString(), "0");
+
+      // divestLeverage should now succeed (debt == 0)
+      await sf.divestLeverage(LEV_ID, 10, 0, { from: alice });
+      assert.equal((await sf.balanceOf(alice, LEV_ID)).toString(), "90");
+    });
+
+    it("LTV decreases after leverDown", async () => {
+      const ltvBefore = new BN(await sf.checkLtv(LEV_ID));
+      await sf.leverDown(LEV_ID, borrowAmount, 0, 3000, "0x", { from: keeperAccount });
+      const ltvAfter = new BN(await sf.checkLtv(LEV_ID));
+      assert.ok(ltvAfter.lt(ltvBefore), "LTV should decrease after leverDown");
+    });
+
+    it("LTV is 0 after full debt repayment", async () => {
+      await sf.leverDown(LEV_ID, borrowAmount, 0, 3000, "0x", { from: keeperAccount });
+      assert.equal((await sf.checkLtv(LEV_ID)).toString(), "0");
+    });
+
+    it("reverts if wethToWithdraw is zero", async () => {
+      await expectRevert(
+        sf.leverDown(LEV_ID, 0, 0, 3000, "0x", { from: keeperAccount }),
+        "amount must be > 0"
+      );
+    });
+
+    it("reverts if no outstanding debt", async () => {
+      // Fully repay first
+      await sf.leverDown(LEV_ID, borrowAmount, 0, 3000, "0x", { from: keeperAccount });
+      await expectRevert(
+        sf.leverDown(LEV_ID, new BN(toWei("0.001")), 0, 3000, "0x", { from: keeperAccount }),
+        "no debt to repay"
+      );
+    });
+
+    it("reverts if not a leverage token", async () => {
+      await expectRevert(
+        sf.leverDown(999, new BN(toWei("0.001")), 0, 3000, "0x", { from: keeperAccount }),
+        "not a leverage token"
+      );
+    });
+
+    it("reverts if called by non-keeper", async () => {
+      await expectRevert(
+        sf.leverDown(LEV_ID, new BN(toWei("0.001")), 0, 3000, "0x", { from: alice }),
+        "not keeper"
+      );
+    });
+
+    it("divestLeverage still reverts if debt is not fully repaid", async () => {
+      // Only partially repay (borrow 0.002, repay 0.001)
+      await sf.leverUp(LEV_ID, borrowAmount, 0, 3000, "0x", { from: keeperAccount });
+      // Now debt = 0.002; do one leverDown to halve it
+      await sf.leverDown(LEV_ID, borrowAmount, 0, 3000, "0x", { from: keeperAccount });
+      // debt still 0.001 remaining
+      assert.ok(new BN(await sf.aaveDebt(LEV_ID)).gt(new BN(0)));
+      await expectRevert(
+        sf.divestLeverage(LEV_ID, 1, 0, { from: alice }),
+        "debt must be repaid"
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // checkLtv
+  // ---------------------------------------------------------------------------
+
+  describe("checkLtv", () => {
+    it("returns 0 before any leverUp", async () => {
+      assert.equal((await sf.checkLtv(LEV_ID)).toString(), "0");
+    });
+
+    it("returns correct bps proportional to borrow", async () => {
+      await sf.leverUp(LEV_ID, new BN(toWei("0.001")), 0, 3000, "0x", { from: keeperAccount });
+      const ltv = new BN(await sf.checkLtv(LEV_ID));
+      // With 1:1 mock: collateral=0.101, debt=0.001 → LTV ≈ 99 bps
+      assert.ok(ltv.gt(new BN(0)), "LTV should be positive");
+      assert.ok(ltv.lte(new BN(1000)), "LTV should be within cap");
+    });
+
+    it("returns 0 after full leverDown", async () => {
+      await sf.leverUp(LEV_ID, new BN(toWei("0.001")), 0, 3000, "0x", { from: keeperAccount });
+      await sf.leverDown(LEV_ID, new BN(toWei("0.001")), 0, 3000, "0x", { from: keeperAccount });
+      assert.equal((await sf.checkLtv(LEV_ID)).toString(), "0");
+    });
+
+    it("reverts for a non-leverage token", async () => {
+      // TOKEN_ID=1 is a regular token in the main suite; here we use a fresh proxy so just use 1
+      await expectRevert(sf.checkLtv(999), "not a leverage token");
+    });
+  });
+});

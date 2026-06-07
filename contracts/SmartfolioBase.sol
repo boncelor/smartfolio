@@ -72,6 +72,9 @@ abstract contract SmartfolioBase {
     error TokenHasSupply();
     error DebtNotRepaid();
     error FacetNotSet();
+    error NoLeveragePosition();
+    error NoDebtToRepay();
+    error LtvCapExceeded();
 
     // -------------------------------------------------------------------------
     // Events
@@ -94,6 +97,8 @@ abstract contract SmartfolioBase {
     event LeverageConfigSet(uint256 indexed id, address aavePool, address stableToken, uint16 targetLtvBps, uint16 maxLtvBps);
     event LeverageMinted(address indexed account, uint256 indexed id, uint256 amount, uint256 ethDeposited);
     event LeverageDivested(address indexed account, uint256 indexed id, uint256 amount, uint256 ethReceived);
+    event LeverUp(uint256 indexed id, uint256 stableBorrowed, uint256 wethAdded, uint256 newLtvBps);
+    event LeverDown(uint256 indexed id, uint256 stableRepaid, uint256 wethWithdrawn, uint256 newLtvBps);
     event TreasuryFacetSet(address facet);
     event MarketFacetSet(address facet);
     event CreditMarketFacetSet(address facet);

@@ -2,14 +2,29 @@
 pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./SmartfolioBase.sol";
 
 /**
  * @title SmartfolioCreditMarket
- * @dev Facet for Aave V3 leverage tokens: mintLeverage and divestLeverage.
- *      Called via delegatecall from Smartfolio.
+ * @dev Facet for Aave V3 leverage tokens. Called via delegatecall from Smartfolio.
+ *
+ *      Phase 1: mintLeverage / divestLeverage — deposit ETH as WETH collateral.
+ *      Phase 2: leverUp / leverDown — keeper-driven signal-based position management.
+ *
+ *      leverUp (golden cross signal):
+ *        borrow stable from Aave → swap stable→WETH via Uniswap → re-deposit WETH
+ *        → on-chain LTV guard: revert if resulting LTV > maxLtvBps (10% hard cap)
+ *
+ *      leverDown (death cross signal):
+ *        withdraw WETH from Aave → swap WETH→stable via Uniswap → repay Aave debt
+ *        → LTV decreases; once aaveDebt == 0, users can call divestLeverage()
  */
 contract SmartfolioCreditMarket is SmartfolioBase, ERC1155Upgradeable {
+
+    // -------------------------------------------------------------------------
+    // Phase 1 — collateral deposit / withdrawal
+    // -------------------------------------------------------------------------
 
     function mintLeverage(
         uint256 id,
@@ -72,5 +87,145 @@ contract SmartfolioCreditMarket is SmartfolioBase, ERC1155Upgradeable {
 
         (bool ok, ) = msg.sender.call{value: withdrawn}("");
         if (!ok) revert ETHTransferFailed();
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 2 — signal-driven keeper operations
+    // -------------------------------------------------------------------------
+
+    /**
+     * @notice Increase leverage on a golden cross signal.
+     * @dev    Keeper only (guard applied in Smartfolio entry point).
+     *         Flow: borrow stable → swap stable→WETH → re-deposit WETH to Aave.
+     *         Reverts if the resulting contract-level LTV exceeds maxLtvBps.
+     * @param id             Token ID (must be a leverage token with collateral).
+     * @param stableToBorrow Amount of stableToken to borrow from Aave.
+     * @param minWethOut     Minimum WETH to receive from the swap (slippage guard).
+     * @param poolFee        Uniswap V3 pool fee for single-hop swap (ignored if swapPath set).
+     * @param swapPath       Encoded Uniswap path stable→WETH; empty = single-hop via poolFee.
+     */
+    function leverUp(
+        uint256 id,
+        uint256 stableToBorrow,
+        uint256 minWethOut,
+        uint24 poolFee,
+        bytes calldata swapPath
+    ) external {
+        if (!isLeverageToken[id]) revert NotLeverageToken();
+        if (stableToBorrow == 0) revert AmountZero();
+        if (aaveCollateral[id] == 0) revert NoLeveragePosition();
+
+        LeverageConfig storage cfg = leverageConfig[id];
+
+        // Borrow stable from Aave (variable rate = 2)
+        IAavePool(cfg.aavePool).borrow(cfg.stableToken, stableToBorrow, 2, 0, address(this));
+        aaveDebt[id] += stableToBorrow;
+
+        // Swap stable → WETH
+        uint256 wethReceived = _swap(cfg.stableToken, address(weth), stableToBorrow, minWethOut, poolFee, swapPath);
+
+        // Re-deposit WETH as collateral
+        weth.approve(cfg.aavePool, wethReceived);
+        IAavePool(cfg.aavePool).supply(address(weth), wethReceived, address(this), 0);
+        aaveCollateral[id] += wethReceived;
+
+        // On-chain LTV guard: revert if contract LTV now exceeds the hard cap
+        (uint256 totalCollateralBase, uint256 totalDebtBase, , , , ) =
+            IAavePool(cfg.aavePool).getUserAccountData(address(this));
+        uint256 newLtvBps = totalCollateralBase > 0
+            ? (totalDebtBase * 10_000) / totalCollateralBase
+            : 0;
+        if (newLtvBps > cfg.maxLtvBps) revert LtvCapExceeded();
+
+        emit LeverUp(id, stableToBorrow, wethReceived, newLtvBps);
+    }
+
+    /**
+     * @notice Decrease leverage on a death cross signal.
+     * @dev    Keeper only (guard applied in Smartfolio entry point).
+     *         Flow: withdraw WETH from Aave → swap WETH→stable → repay Aave debt.
+     *         When aaveDebt[id] reaches 0, users can call divestLeverage().
+     * @param id              Token ID (must be a leverage token with outstanding debt).
+     * @param wethToWithdraw  Amount of WETH to withdraw from Aave collateral.
+     * @param minStableOut    Minimum stable to receive from the swap (slippage guard).
+     * @param poolFee         Uniswap V3 pool fee for single-hop swap.
+     * @param swapPath        Encoded Uniswap path WETH→stable; empty = single-hop.
+     */
+    function leverDown(
+        uint256 id,
+        uint256 wethToWithdraw,
+        uint256 minStableOut,
+        uint24 poolFee,
+        bytes calldata swapPath
+    ) external {
+        if (!isLeverageToken[id]) revert NotLeverageToken();
+        if (wethToWithdraw == 0) revert AmountZero();
+        if (aaveDebt[id] == 0) revert NoDebtToRepay();
+
+        LeverageConfig storage cfg = leverageConfig[id];
+
+        // Withdraw WETH from Aave
+        uint256 withdrawn = IAavePool(cfg.aavePool).withdraw(address(weth), wethToWithdraw, address(this));
+        aaveCollateral[id] -= withdrawn;
+
+        // Swap WETH → stable
+        uint256 stableReceived = _swap(address(weth), cfg.stableToken, withdrawn, minStableOut, poolFee, swapPath);
+
+        // Repay stable debt to Aave
+        IERC20(cfg.stableToken).approve(cfg.aavePool, stableReceived);
+        uint256 repaid = IAavePool(cfg.aavePool).repay(cfg.stableToken, stableReceived, 2, address(this));
+
+        // Update tracked debt — clamp to current balance to guard against rounding
+        aaveDebt[id] = repaid >= aaveDebt[id] ? 0 : aaveDebt[id] - repaid;
+
+        // Read new LTV for event
+        (uint256 totalCollateralBase, uint256 totalDebtBase, , , , ) =
+            IAavePool(cfg.aavePool).getUserAccountData(address(this));
+        uint256 newLtvBps = totalCollateralBase > 0
+            ? (totalDebtBase * 10_000) / totalCollateralBase
+            : 0;
+
+        emit LeverDown(id, repaid, withdrawn, newLtvBps);
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal swap helper
+    // -------------------------------------------------------------------------
+
+    /// @dev Single-hop or multi-hop exact-input swap via Uniswap V3.
+    function _swap(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        uint24 poolFee,
+        bytes memory swapPath
+    ) internal returns (uint256 amountOut) {
+        IERC20(tokenIn).approve(address(swapRouter), amountIn);
+
+        if (swapPath.length == 0) {
+            amountOut = swapRouter.exactInputSingle(
+                ISwapRouter.ExactInputSingleParams({
+                    tokenIn:           tokenIn,
+                    tokenOut:          tokenOut,
+                    fee:               poolFee,
+                    recipient:         address(this),
+                    deadline:          block.timestamp,
+                    amountIn:          amountIn,
+                    amountOutMinimum:  amountOutMin,
+                    sqrtPriceLimitX96: 0
+                })
+            );
+        } else {
+            amountOut = swapRouter.exactInput(
+                ISwapRouter.ExactInputParams({
+                    path:             swapPath,
+                    recipient:        address(this),
+                    deadline:         block.timestamp,
+                    amountIn:         amountIn,
+                    amountOutMinimum: amountOutMin
+                })
+            );
+        }
     }
 }
