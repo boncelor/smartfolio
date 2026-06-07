@@ -7,7 +7,7 @@ interface Props {
   tokenId: number
 }
 
-export default function MintForm({ tokenId }: Props) {
+export default function MintLeverageForm({ tokenId }: Props) {
   const [amount, setAmount] = useState('')
   const { address, isConnected } = useAccount()
 
@@ -19,9 +19,7 @@ export default function MintForm({ tokenId }: Props) {
     abi: SMARTFOLIO_ABI,
     functionName: 'mintCost',
     args: [BigInt(tokenId), BigInt(parsedAmount)],
-    query: {
-      enabled: isValidAmount && tokenId > 0,
-    },
+    query: { enabled: isValidAmount && tokenId > 0 },
   })
 
   const { writeContract, data: txHash, isPending: isWritePending, error: writeError } = useWriteContract()
@@ -34,8 +32,8 @@ export default function MintForm({ tokenId }: Props) {
     writeContract({
       address: CONTRACT_ADDRESS,
       abi: SMARTFOLIO_ABI,
-      functionName: 'mint',
-      args: [address, BigInt(tokenId), BigInt(parsedAmount), '0x'],
+      functionName: 'mintLeverage',
+      args: [BigInt(tokenId), BigInt(parsedAmount), '0x'],
       value: cost,
     })
   }
@@ -45,7 +43,12 @@ export default function MintForm({ tokenId }: Props) {
 
   return (
     <div className="card space-y-4">
-      <h2 className="text-lg font-bold text-white">Mint Tokens</h2>
+      <div>
+        <h2 className="text-lg font-bold text-white">Mint Leverage Tokens</h2>
+        <p className="text-xs mt-1" style={{ color: 'rgba(212,175,55,0.5)' }}>
+          ETH is deposited as WETH collateral into Aave. The keeper manages the leverage position.
+        </p>
+      </div>
 
       <div className="space-y-1">
         <label className="stat-label">Amount</label>
@@ -65,20 +68,22 @@ export default function MintForm({ tokenId }: Props) {
       </div>
 
       <div className="flex items-center justify-between box-info">
-        <span className="stat-label" style={{ marginBottom: 0 }}>Cost</span>
+        <span className="stat-label" style={{ marginBottom: 0 }}>ETH to deposit (collateral)</span>
         {cost !== undefined && isValidAmount ? (
-          <span className="font-semibold text-gold">{formatEther(cost)} ETH</span>
+          <span className="font-bold text-gold">{formatEther(cost)} ETH</span>
         ) : (
           <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>
         )}
       </div>
 
-      <button onClick={handleMint} disabled={isDisabled} className="btn-money">
-        {isWritePending ? 'Confirm in wallet…' : isConfirming ? 'Minting…' : 'Mint'}
+      <button onClick={handleMint} disabled={isDisabled} className="btn-gold">
+        {isWritePending ? 'Confirm in wallet…' : isConfirming ? 'Minting…' : 'Mint Leverage'}
       </button>
 
       {isConfirmed && (
-        <p className="text-sm font-semibold" style={{ color: '#34d399' }}>Minted! Transaction confirmed.</p>
+        <p className="text-sm font-semibold" style={{ color: '#34d399' }}>
+          Minted! ETH deposited to Aave as collateral.
+        </p>
       )}
       {writeError && (
         <p className="text-sm break-all" style={{ color: '#f87171' }}>Error: {writeError.message}</p>

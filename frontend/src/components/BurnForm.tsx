@@ -29,9 +29,7 @@ export default function BurnForm({ tokenId }: Props) {
     abi: SMARTFOLIO_ABI,
     functionName: 'portfolioActive',
     args: [BigInt(tokenId)],
-    query: {
-      enabled: tokenId > 0,
-    },
+    query: { enabled: tokenId > 0 },
   })
 
   const { data: balance } = useReadContract({
@@ -62,29 +60,26 @@ export default function BurnForm({ tokenId }: Props) {
   const isDisabled =
     !isConnected || !isValidAmount || portfolioActive === true || isWritePending || isConfirming
 
-  // burnRefundData is a tuple: [gross, fee, net]
   const gross = burnRefundData?.[0]
-  const fee = burnRefundData?.[1]
-  const net = burnRefundData?.[2]
+  const fee   = burnRefundData?.[1]
+  const net   = burnRefundData?.[2]
 
   return (
-    <div className="bg-gray-900 rounded-xl p-5 border border-gray-800 space-y-4">
-      <h2 className="text-lg font-semibold text-gray-100">Burn Tokens</h2>
+    <div className="card space-y-4">
+      <h2 className="text-lg font-bold text-white">Burn Tokens</h2>
 
-      {/* Portfolio active warning */}
       {portfolioActive && (
-        <div className="bg-orange-900/40 border border-orange-700 rounded-lg px-4 py-3 text-orange-300 text-sm">
-          Portfolio is active — use Divest for fee-free exit. Burn will fail while portfolio is deployed.
+        <div className="box-warning">
+          Portfolio is active — use <strong>Divest</strong> for a fee-free exit. Burn will fail while assets are deployed.
         </div>
       )}
 
-      {/* Amount input */}
       <div className="space-y-1">
         <div className="flex items-center justify-between">
-          <label className="text-sm text-gray-400">Amount</label>
+          <label className="stat-label">Amount</label>
           {isConnected && balance !== undefined && (
-            <span className="text-xs text-gray-500">
-              Balance: {balance.toString()} tokens
+            <span className="text-xs" style={{ color: 'rgba(212,175,55,0.5)' }}>
+              Balance: {balance.toString()}
             </span>
           )}
         </div>
@@ -94,53 +89,42 @@ export default function BurnForm({ tokenId }: Props) {
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           placeholder="0"
-          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 w-full focus:outline-none focus:border-emerald-500"
+          className="input-money"
         />
       </div>
 
-      {/* Fee breakdown */}
       {isValidAmount && burnRefundData !== undefined && (
-        <div className="bg-gray-800/60 rounded-lg p-3 space-y-1.5 text-sm">
+        <div className="box-info space-y-2 text-sm">
           <div className="flex justify-between">
-            <span className="text-gray-400">Gross</span>
-            <span className="text-gray-200">{gross !== undefined ? formatEther(gross) : '—'} ETH</span>
+            <span className="stat-label" style={{ marginBottom: 0 }}>Gross</span>
+            <span className="text-white font-medium">{gross !== undefined ? formatEther(gross) : '—'} ETH</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-gray-400">Fee</span>
-            <span className="text-orange-400">{fee !== undefined ? formatEther(fee) : '—'} ETH</span>
+            <span className="stat-label" style={{ marginBottom: 0 }}>Fee</span>
+            <span style={{ color: '#fb923c' }} className="font-medium">{fee !== undefined ? formatEther(fee) : '—'} ETH</span>
           </div>
-          <div className="flex justify-between border-t border-gray-700 pt-1.5">
-            <span className="text-gray-400">You receive</span>
-            <span className="text-emerald-400 font-semibold">
-              {net !== undefined ? formatEther(net) : '—'} ETH
-            </span>
+          <div
+            className="flex justify-between pt-2 border-t"
+            style={{ borderColor: 'rgba(212,175,55,0.12)' }}
+          >
+            <span className="stat-label" style={{ marginBottom: 0 }}>You receive</span>
+            <span className="font-bold text-gold">{net !== undefined ? formatEther(net) : '—'} ETH</span>
           </div>
         </div>
       )}
 
-      {/* Burn button */}
-      <button
-        onClick={handleBurn}
-        disabled={isDisabled}
-        className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
-      >
-        {isWritePending ? 'Confirm in wallet...' : isConfirming ? 'Burning...' : 'Burn'}
+      <button onClick={handleBurn} disabled={isDisabled} className="btn-money">
+        {isWritePending ? 'Confirm in wallet…' : isConfirming ? 'Burning…' : 'Burn'}
       </button>
 
-      {/* Tx status */}
-      {isConfirming && (
-        <p className="text-sm text-emerald-400">Burning... waiting for confirmation.</p>
-      )}
       {isConfirmed && (
-        <p className="text-sm text-emerald-400 font-medium">Burned! Transaction confirmed.</p>
+        <p className="text-sm font-semibold" style={{ color: '#34d399' }}>Burned! Transaction confirmed.</p>
       )}
       {writeError && (
-        <p className="text-sm text-red-400 break-all">
-          Error: {writeError.message}
-        </p>
+        <p className="text-sm break-all" style={{ color: '#f87171' }}>Error: {writeError.message}</p>
       )}
       {!isConnected && (
-        <p className="text-sm text-gray-500">Connect your wallet to burn.</p>
+        <p className="text-sm" style={{ color: 'rgba(212,175,55,0.5)' }}>Connect your wallet to burn.</p>
       )}
     </div>
   )

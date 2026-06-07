@@ -1,3 +1,294 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ─── The Money Vibe Palette ────────────────────────────────────────────── */
+:root {
+  --dark-money:   #0a2f1d;
+  --darker-money: #05190e;
+  --mid-money:    #0d3a22;
+  --card-money:   #071e12;
+  --light-money:  #10b981;
+  --gold-foil:    #d4af37;
+  --gold-light:   #f3e5ab;
+  --gold-dark:    #b38728;
+  --gold-dim:     #9e7215;
+
+  --bg-gradient:    linear-gradient(135deg, #05190e 0%, #0a2f1d 100%);
+  --money-gradient: linear-gradient(135deg, #0a2f1d 0%, #10b981 100%);
+  --gold-gradient:  linear-gradient(90deg, #b38728 0%, #f3e5ab 50%, #9e7215 100%);
+  --card-bg:        linear-gradient(135deg, rgba(212,175,55,0.07) 0%, rgba(16,185,129,0.04) 100%);
+}
+
+@layer base {
+  body {
+    background: var(--bg-gradient);
+    min-height: 100vh;
+    color: #ffffff;
+  }
+
+  /* Number inputs — remove browser spinners */
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type='number'] { -moz-appearance: textfield; }
+}
+
+/* ─── Luxury component classes ──────────────────────────────────────────── */
+@layer components {
+
+  /* ── Card ── */
+  .card {
+    background: var(--card-bg);
+    background-color: var(--card-money);
+    border: 1px solid rgba(212, 175, 55, 0.25);
+    border-radius: 0.875rem;
+    padding: 1.25rem;
+    box-shadow:
+      0 4px 24px rgba(0, 0, 0, 0.45),
+      inset 0 1px 0 rgba(212, 175, 55, 0.08);
+  }
+
+  /* ── Input ── */
+  .input-money {
+    background-color: rgba(5, 25, 14, 0.9);
+    border: 1px solid rgba(212, 175, 55, 0.2);
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    color: #ffffff;
+    width: 100%;
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    font-size: 0.9375rem;
+  }
+  .input-money:focus {
+    border-color: rgba(212, 175, 55, 0.55);
+    box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.08);
+  }
+  .input-money::placeholder { color: rgba(255,255,255,0.25); }
+
+  /* ── Select ── */
+  .select-money {
+    background-color: rgba(5, 25, 14, 0.9);
+    border: 1px solid rgba(212, 175, 55, 0.2);
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    color: #ffffff;
+    width: 100%;
+    outline: none;
+    transition: border-color 0.2s ease;
+    appearance: none;
+    cursor: pointer;
+  }
+  .select-money:focus {
+    border-color: rgba(212, 175, 55, 0.55);
+    box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.08);
+  }
+
+  /* ── Primary button (money gradient) ── */
+  .btn-money {
+    background: var(--money-gradient);
+    color: #ffffff;
+    border: 1px solid var(--gold-foil);
+    padding: 0.625rem 1.25rem;
+    border-radius: 0.5rem;
+    font-weight: 700;
+    font-size: 0.9375rem;
+    width: 100%;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    letter-spacing: 0.02em;
+  }
+  .btn-money:hover:not(:disabled) {
+    box-shadow:
+      0 0 20px rgba(16, 185, 129, 0.4),
+      0 0 40px rgba(212, 175, 55, 0.15);
+    transform: translateY(-1px);
+  }
+  .btn-money:disabled {
+    background: #111f17;
+    border-color: rgba(212, 175, 55, 0.1);
+    color: #3a4f3f;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  /* ── Gold button ── */
+  .btn-gold {
+    background: var(--gold-gradient);
+    color: #05190e;
+    border: 1px solid var(--gold-foil);
+    padding: 0.625rem 1.25rem;
+    border-radius: 0.5rem;
+    font-weight: 700;
+    font-size: 0.9375rem;
+    width: 100%;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    letter-spacing: 0.02em;
+  }
+  .btn-gold:hover:not(:disabled) {
+    box-shadow: 0 0 24px rgba(212, 175, 55, 0.55);
+    transform: translateY(-1px);
+  }
+  .btn-gold:disabled {
+    background: #1c1a08;
+    border-color: rgba(212, 175, 55, 0.1);
+    color: #3a3a20;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  /* ── Danger / emergency button ── */
+  .btn-danger {
+    background: linear-gradient(135deg, #7f1d1d 0%, #b91c1c 100%);
+    color: #ffffff;
+    border: 1px solid rgba(248, 113, 113, 0.5);
+    padding: 0.625rem 1.25rem;
+    border-radius: 0.5rem;
+    font-weight: 700;
+    font-size: 0.9375rem;
+    width: 100%;
+    transition: all 0.3s ease;
+    cursor: pointer;
+  }
+  .btn-danger:hover:not(:disabled) {
+    box-shadow: 0 0 20px rgba(185, 28, 28, 0.5);
+    transform: translateY(-1px);
+  }
+  .btn-danger:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  /* ── Small outline buttons ── */
+  .btn-outline-gold {
+    border: 1px solid rgba(212, 175, 55, 0.45);
+    color: #f3e5ab;
+    padding: 0.375rem 0.75rem;
+    border-radius: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+  }
+  .btn-outline-gold:hover {
+    background: rgba(212, 175, 55, 0.1);
+    border-color: rgba(212, 175, 55, 0.7);
+  }
+
+  /* ── Gold gradient text ── */
+  .text-gold {
+    background: var(--gold-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    font-weight: 700;
+  }
+
+  /* ── Stat label / value ── */
+  .stat-label {
+    color: rgba(212, 175, 55, 0.55);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+  }
+  .stat-value {
+    color: #ffffff;
+    font-size: 1.1rem;
+    font-weight: 600;
+  }
+
+  /* ── Divider ── */
+  .divider-money {
+    border-color: rgba(212, 175, 55, 0.12);
+  }
+
+  /* ── Badges ── */
+  .badge-gold {
+    background: rgba(212, 175, 55, 0.12);
+    border: 1px solid rgba(212, 175, 55, 0.35);
+    color: #f3e5ab;
+    font-size: 0.6875rem;
+    padding: 0.15rem 0.6rem;
+    border-radius: 9999px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .badge-green {
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    color: #6ee7b7;
+    font-size: 0.6875rem;
+    padding: 0.15rem 0.6rem;
+    border-radius: 9999px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .badge-red {
+    background: rgba(185, 28, 28, 0.15);
+    border: 1px solid rgba(248, 113, 113, 0.3);
+    color: #fca5a5;
+    font-size: 0.6875rem;
+    padding: 0.15rem 0.6rem;
+    border-radius: 9999px;
+    font-weight: 700;
+  }
+  .badge-keeper {
+    background: rgba(212, 175, 55, 0.12);
+    border: 1px solid rgba(212, 175, 55, 0.35);
+    color: #f3e5ab;
+    font-size: 0.6875rem;
+    padding: 0.15rem 0.6rem;
+    border-radius: 9999px;
+    font-weight: 700;
+  }
+
+  /* ── Info / warning boxes ── */
+  .box-warning {
+    background: rgba(212, 175, 55, 0.07);
+    border: 1px solid rgba(212, 175, 55, 0.3);
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+    color: #f3e5ab;
+    font-size: 0.8125rem;
+  }
+  .box-error {
+    background: rgba(185, 28, 28, 0.12);
+    border: 1px solid rgba(248, 113, 113, 0.3);
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+    color: #fca5a5;
+    font-size: 0.8125rem;
+  }
+  .box-info {
+    background: rgba(5, 25, 14, 0.7);
+    border: 1px solid rgba(212, 175, 55, 0.15);
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+  }
+
+  /* ── Tab ── */
+  .tab-active-green {
+    color: #34d399;
+    border-bottom: 2px solid #10b981;
+    margin-bottom: -1px;
+  }
+  .tab-active-gold {
+    color: #f3e5ab;
+    border-bottom: 2px solid #d4af37;
+    margin-bottom: -1px;
+  }
+  .tab-inactive {
+    color: rgba(255,255,255,0.35);
+  }
+  .tab-inactive:hover {
+    color: rgba(255,255,255,0.65);
+  }
+}

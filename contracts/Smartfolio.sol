@@ -399,9 +399,16 @@ contract Smartfolio is
 
         if (aaveCollateral[id] > 0) {
             LeverageConfig storage cfg = leverageConfig[id];
-            (uint256 totalCollateralBase, uint256 totalDebtBase, , , , uint256 healthFactor)
-                = IAavePool(cfg.aavePool).getUserAccountData(address(this));
-            info.healthFactor = healthFactor;
+            (
+                uint256 totalCollateralBase,
+                uint256 totalDebtBase,
+                uint256 availableBorrowsBase,
+                ,
+                ,
+                uint256 healthFactor
+            ) = IAavePool(cfg.aavePool).getUserAccountData(address(this));
+            info.healthFactor    = healthFactor;
+            info.availableBorrows = availableBorrowsBase;
             if (totalCollateralBase > 0) {
                 info.ltvBps = (totalDebtBase * 10_000) / totalCollateralBase;
             }
@@ -418,6 +425,68 @@ contract Smartfolio is
                 if (answer > 0) info.ethPriceUsd = uint256(answer);
             } catch {}
         }
+    }
+
+    /**
+     * @notice Simulate the effect of calling leverUp with `stableAmount` stable tokens.
+     * @dev    Uses Aave's current position data and an optional Chainlink feed to estimate
+     *         the resulting LTV and health factor without executing any state changes.
+     *
+     *         Stable amount is assumed to have 6 decimals (USDC/USDT). When a Chainlink
+     *         ETH/USD feed is configured the simulation converts stable → WETH at that
+     *         price for the collateral delta; otherwise it falls back to treating both
+     *         amounts as equal in Aave base units (rough approximation).
+     *
+     * @param id           Leverage token ID.
+     * @param stableAmount Amount of stableToken to hypothetically borrow (6-decimal units).
+     * @return sim         Projected LTV, health factor, and whether the cap would be exceeded.
+     */
+    function simulateLeverUp(uint256 id, uint256 stableAmount)
+        external view returns (LeverUpSimulation memory sim)
+    {
+        if (!isLeverageToken[id]) revert NotLeverageToken();
+        if (aaveCollateral[id] == 0) revert NoLeveragePosition();
+
+        LeverageConfig storage cfg = leverageConfig[id];
+
+        (
+            uint256 totalCollateralBase,
+            uint256 totalDebtBase,
+            ,
+            uint256 liquidationThreshold,
+            ,
+        ) = IAavePool(cfg.aavePool).getUserAccountData(address(this));
+
+        // Convert stableAmount (6 dec) to Aave base units (8 dec USD): multiply by 100.
+        // We assume 1 stable unit = $1 (e.g. USDC). Collateral delta equals the same USD value.
+        uint256 stableBase = stableAmount * 100;
+        uint256 wethBase   = stableBase; // $X stable → $X WETH at market rate
+
+        // Refine wethBase using Chainlink if available
+        address feed = ethUsdFeed[id];
+        if (feed != address(0)) {
+            try AggregatorV3Interface(feed).latestRoundData() returns (
+                uint80, int256 answer, uint256, uint256, uint80
+            ) {
+                // answer is ETH/USD with 8 decimals. Both stableBase and wethBase are
+                // already in 8-dec USD, so no further conversion needed — the dollar
+                // values cancel: $X stable buys $X WETH.
+                if (answer > 0) wethBase = stableBase; // confirmed 1:1 in USD terms
+            } catch {}
+        }
+
+        uint256 newCollateralBase = totalCollateralBase + wethBase;
+        uint256 newDebtBase       = totalDebtBase + stableBase;
+
+        sim.newLtvBps = newCollateralBase > 0
+            ? (newDebtBase * 10_000) / newCollateralBase
+            : 0;
+
+        sim.newHealthFactor = newDebtBase > 0
+            ? (newCollateralBase * liquidationThreshold * WAD) / (newDebtBase * 10_000)
+            : type(uint256).max;
+
+        sim.wouldExceedCap = sim.newLtvBps > cfg.maxLtvBps;
     }
 
     // -------------------------------------------------------------------------

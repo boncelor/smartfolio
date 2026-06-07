@@ -178,6 +178,13 @@ abstract contract SmartfolioBase {
         uint256 healthFactor;     // Aave HF in WAD (1e18 = 1.0)
         uint256 ethPriceUsd;      // ETH/USD price from Chainlink (8 decimals); 0 if no feed
         uint256 emergencyFloor;   // HF floor below which emergency deleverage is triggered
+        uint256 availableBorrows; // additional stable (in Aave base USD, 8 dec) that can be borrowed within maxLtvBps
+    }
+
+    struct LeverUpSimulation {
+        uint256 newLtvBps;        // projected LTV in bps after the lever-up
+        uint256 newHealthFactor;  // projected Aave health factor in WAD
+        bool    wouldExceedCap;   // true if newLtvBps > maxLtvBps
     }
 
     // -------------------------------------------------------------------------

@@ -44,16 +44,18 @@ export default function InfoCard({ tokenId }: Props) {
 
   if (isZeroAddress) {
     return (
-      <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
-        <p className="text-gray-500 text-sm">No data — contract address not configured.</p>
+      <div className="card">
+        <p className="text-sm" style={{ color: 'rgba(212,175,55,0.5)' }}>
+          No data — contract address not configured.
+        </p>
       </div>
     )
   }
 
   if (isPending) {
     return (
-      <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
-        <p className="text-gray-500 text-sm">Loading...</p>
+      <div className="card">
+        <p className="text-sm" style={{ color: 'rgba(212,175,55,0.5)' }}>Loading...</p>
       </div>
     )
   }
@@ -67,69 +69,57 @@ export default function InfoCard({ tokenId }: Props) {
 
   if (!info) {
     return (
-      <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
-        <p className="text-gray-500 text-sm">No data</p>
+      <div className="card">
+        <p className="text-sm" style={{ color: 'rgba(212,175,55,0.5)' }}>No data</p>
       </div>
     )
   }
 
   return (
-    <div className="bg-gray-900 rounded-xl p-5 border border-gray-800 space-y-4">
+    <div className="card space-y-4">
       {/* Row 1 */}
       <div className="grid grid-cols-3 gap-4">
         <div>
-          <p className="text-xs text-gray-500 mb-1">Supply</p>
-          <p className="text-lg font-semibold text-gray-100">{info.circulatingSupply.toString()}</p>
+          <p className="stat-label">Supply</p>
+          <p className="stat-value">{info.circulatingSupply.toString()}</p>
         </div>
         <div>
-          <p className="text-xs text-gray-500 mb-1">Reserve</p>
-          <p className="text-lg font-semibold text-gray-100">
-            {formatEther(info.reserve)} ETH
-          </p>
+          <p className="stat-label">Reserve</p>
+          <p className="stat-value">{formatEther(info.reserve)} ETH</p>
         </div>
         <div>
-          <p className="text-xs text-gray-500 mb-1">Backing/Token</p>
-          <p className="text-lg font-semibold text-gray-100">
-            {formatEther(info.backingPerToken)} ETH
-          </p>
+          <p className="stat-label">Backing / Token</p>
+          <p className="stat-value">{formatEther(info.backingPerToken)} ETH</p>
         </div>
       </div>
 
       {/* Row 2 */}
-      <div className="grid grid-cols-3 gap-4 pt-3 border-t border-gray-800">
+      <div className="grid grid-cols-3 gap-4 pt-3 border-t divider-money">
         <div>
-          <p className="text-xs text-gray-500 mb-1">Tier</p>
-          <p className="text-lg font-semibold text-gray-100">{info.currentTierIndex.toString()}</p>
+          <p className="stat-label">Tier</p>
+          <p className="stat-value">{info.currentTierIndex.toString()}</p>
         </div>
         <div>
-          <p className="text-xs text-gray-500 mb-1">Next Price</p>
-          <p className="text-lg font-semibold text-gray-100">
-            {formatEther(info.currentPrice)} ETH/token
-          </p>
+          <p className="stat-label">Next Price</p>
+          <p className="stat-value">{formatEther(info.currentPrice)} ETH</p>
         </div>
         <div>
-          <p className="text-xs text-gray-500 mb-1">Status</p>
+          <p className="stat-label">Status</p>
           {portfolioActive === null ? (
-            <span className="text-gray-500 text-sm">—</span>
+            <span style={{ color: 'rgba(255,255,255,0.3)' }}>—</span>
           ) : portfolioActive ? (
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-900/60 text-emerald-300 border border-emerald-700">
-              Portfolio Active
-            </span>
+            <span className="badge-green">Portfolio Active</span>
           ) : (
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-800 text-gray-400 border border-gray-700">
-              Reserve Mode
-            </span>
+            <span className="badge-gold">Reserve Mode</span>
           )}
         </div>
       </div>
 
       {/* User balance */}
       {isConnected && balance !== undefined && (
-        <div className="pt-3 border-t border-gray-800">
-          <p className="text-sm text-gray-400">
-            Your Balance:{' '}
-            <span className="text-gray-100 font-semibold">{balance.toString()} tokens</span>
-          </p>
+        <div className="pt-3 border-t divider-money flex items-center justify-between">
+          <span className="stat-label" style={{ marginBottom: 0 }}>Your Balance</span>
+          <span className="font-semibold text-white">{balance.toString()} tokens</span>
         </div>
       )}
     </div>

@@ -5,10 +5,21 @@ import InfoCard from './components/InfoCard'
 import MintForm from './components/MintForm'
 import BurnForm from './components/BurnForm'
 import DivestForm from './components/DivestForm'
+import LeverageInfoCard from './components/LeverageInfoCard'
+import MintLeverageForm from './components/MintLeverageForm'
+import DivestLeverageForm from './components/DivestLeverageForm'
+import KeeperPanel from './components/KeeperPanel'
 
-type Tab = 'mint' | 'burn' | 'divest'
+type Tab = 'mint' | 'burn' | 'divest' | 'leverage'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+
+const TAB_LABELS: Record<Tab, string> = {
+  mint:     'Mint',
+  burn:     'Burn',
+  divest:   'Divest',
+  leverage: 'Leverage',
+}
 
 export default function App() {
   const [tokenId, setTokenId] = useState<number>(1)
@@ -17,22 +28,32 @@ export default function App() {
   const isZeroAddress = CONTRACT_ADDRESS === ZERO_ADDRESS
 
   return (
-    <div className="bg-gray-950 min-h-screen text-gray-100">
+    <div className="min-h-screen text-white">
       <Header />
 
       {isZeroAddress && (
-        <div className="bg-yellow-900/50 border-b border-yellow-700 px-4 py-3 text-yellow-300 text-sm text-center">
-          Warning: Contract address is not set. Deploy the contract or set{' '}
-          <code className="font-mono bg-yellow-900/60 px-1 rounded">VITE_CONTRACT_ADDRESS</code> in your{' '}
-          <code className="font-mono bg-yellow-900/60 px-1 rounded">.env</code> file.
+        <div
+          className="px-4 py-3 text-sm text-center"
+          style={{
+            background: 'rgba(212,175,55,0.08)',
+            borderBottom: '1px solid rgba(212,175,55,0.25)',
+            color: '#f3e5ab',
+          }}
+        >
+          Contract address not set — deploy or set{' '}
+          <code className="font-mono px-1 rounded" style={{ background: 'rgba(212,175,55,0.15)' }}>
+            VITE_CONTRACT_ADDRESS
+          </code>{' '}
+          in your <code className="font-mono px-1 rounded" style={{ background: 'rgba(212,175,55,0.15)' }}>.env</code>.
         </div>
       )}
 
       <main className="flex justify-center px-4 py-8">
         <div className="w-full max-w-2xl space-y-6">
+
           {/* Token ID input */}
           <div className="flex items-center gap-4">
-            <label htmlFor="token-id" className="text-sm font-medium text-gray-400 whitespace-nowrap">
+            <label htmlFor="token-id" className="stat-label whitespace-nowrap" style={{ fontSize: '0.8125rem' }}>
               Token ID
             </label>
             <input
@@ -41,7 +62,8 @@ export default function App() {
               min={1}
               value={tokenId}
               onChange={(e) => setTokenId(Math.max(1, parseInt(e.target.value) || 1))}
-              className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 w-32 focus:outline-none focus:border-emerald-500"
+              className="input-money"
+              style={{ width: '7rem' }}
             />
           </div>
 
@@ -49,26 +71,36 @@ export default function App() {
           <InfoCard tokenId={tokenId} />
 
           {/* Tab bar */}
-          <div className="flex border-b border-gray-800">
-            {(['mint', 'burn', 'divest'] as Tab[]).map((tab) => (
+          <div className="flex border-b" style={{ borderColor: 'rgba(212,175,55,0.15)' }}>
+            {(Object.keys(TAB_LABELS) as Tab[]).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`px-6 py-3 text-sm font-medium capitalize transition-colors ${
+                className={`px-6 py-3 text-sm font-semibold transition-colors ${
                   activeTab === tab
-                    ? 'text-emerald-400 border-b-2 border-emerald-500 -mb-px'
-                    : 'text-gray-400 hover:text-gray-200'
+                    ? tab === 'leverage'
+                      ? 'tab-active-gold'
+                      : 'tab-active-green'
+                    : 'tab-inactive'
                 }`}
               >
-                {tab === 'divest' ? 'Divest' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                {TAB_LABELS[tab]}
               </button>
             ))}
           </div>
 
           {/* Tab content */}
-          {activeTab === 'mint' && <MintForm tokenId={tokenId} />}
-          {activeTab === 'burn' && <BurnForm tokenId={tokenId} />}
-          {activeTab === 'divest' && <DivestForm tokenId={tokenId} />}
+          {activeTab === 'mint'     && <MintForm tokenId={tokenId} />}
+          {activeTab === 'burn'     && <BurnForm tokenId={tokenId} />}
+          {activeTab === 'divest'   && <DivestForm tokenId={tokenId} />}
+          {activeTab === 'leverage' && (
+            <div className="space-y-4">
+              <LeverageInfoCard tokenId={tokenId} />
+              <MintLeverageForm tokenId={tokenId} />
+              <DivestLeverageForm tokenId={tokenId} />
+              <KeeperPanel tokenId={tokenId} />
+            </div>
+          )}
         </div>
       </main>
     </div>
