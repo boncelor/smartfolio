@@ -1947,3 +1947,313 @@ contract("Smartfolio — leverage Phase 2", (accounts) => {
     });
   });
 });
+
+// =============================================================================
+// Leverage Phase 3 — Chainlink oracle + emergency deleverage
+// =============================================================================
+
+const MockChainlinkFeed = artifacts.require("MockChainlinkFeed");
+
+contract("Smartfolio — leverage Phase 3", (accounts) => {
+  const [owner, keeperAccount, alice] = accounts;
+
+  const LEV_ID = 10;
+  const LEV_TIERS = [{ threshold: 0, pricePerToken: toWei("0.001") }];
+
+  const makeLevCfg = (pool, stable) => ({
+    aavePool:     pool,
+    stableToken:  stable,
+    targetLtvBps: 500,
+    maxLtvBps:    1000,
+  });
+
+  // HF floor of 1e30 — effectively always triggered (mock HF = type(uint256).max when no debt,
+  // but after leverUp HF will be finite). We use a floor just above the post-leverUp HF to
+  // force the emergency condition.
+  // After leverUp with tiny borrow: collateral ~0.101, debt 0.001 → HF = 0.101 * 0.8 / 0.001 * 1e18 ≈ 80.8e18
+  const EMERGENCY_FLOOR = new BN(toWei("100")); // 100.0 — above the ~80 HF after leverUp
+
+  let sf, mockWETH, mockStable, mockAavePool, mockRouter, mockFeed;
+  let mintCost100;
+
+  beforeEach(async () => {
+    const tFacet = await SmartfolioTreasury.new();
+    const mFacet = await SmartfolioMarket.new();
+    const cFacet = await SmartfolioCreditMarket.new();
+    sf = await deployProxy(
+      Smartfolio,
+      [owner, tFacet.address, mFacet.address, cFacet.address],
+      { kind: "uups" }
+    );
+
+    mockWETH     = await MockWETH.new();
+    mockStable   = await MockERC20.new("USD Coin", "USDC");
+    mockAavePool = await MockAavePool.new();
+    mockRouter   = await MockSwapRouter.new();
+    mockFeed     = await MockChainlinkFeed.new(String(3000e8)); // $3000 / ETH
+
+    await sf.setWETH(mockWETH.address,        { from: owner });
+    await sf.setSwapRouter(mockRouter.address, { from: owner });
+    await sf.setKeeper(keeperAccount,          { from: owner });
+    await sf.setTiers(LEV_ID, LEV_TIERS,       { from: owner });
+    await sf.setLeverageConfig(LEV_ID, makeLevCfg(mockAavePool.address, mockStable.address), { from: owner });
+
+    // Alice mints 100 tokens → 0.1 ETH collateral in Aave
+    mintCost100 = await sf.mintCost(LEV_ID, 100);
+    await sf.mintLeverage(LEV_ID, 100, "0x", { from: alice, value: mintCost100 });
+
+    // Fund pool with stable for borrow, router with WETH for leverUp and stable for leverDown
+    await mockStable.mint(mockAavePool.address, toWei("10"));
+    await mockWETH.deposit({ value: toWei("1"), from: owner });
+    await mockWETH.transfer(mockRouter.address, toWei("1"), { from: owner });
+    await mockStable.mint(mockRouter.address, toWei("10"));
+
+    // Set up a leveraged position so there's debt to repay
+    await sf.leverUp(LEV_ID, new BN(toWei("0.001")), 0, 3000, "0x", { from: keeperAccount });
+  });
+
+  // ---------------------------------------------------------------------------
+  // setEthUsdFeed
+  // ---------------------------------------------------------------------------
+
+  describe("setEthUsdFeed", () => {
+    it("stores the feed address and emits EthUsdFeedSet", async () => {
+      const tx = await sf.setEthUsdFeed(LEV_ID, mockFeed.address, { from: owner });
+      assert.equal(await sf.ethUsdFeed(LEV_ID), mockFeed.address);
+      const ev = tx.logs.find(l => l.event === "EthUsdFeedSet");
+      assert.ok(ev, "EthUsdFeedSet not emitted");
+      assert.equal(ev.args.feed, mockFeed.address);
+    });
+
+    it("allows clearing the feed (address zero)", async () => {
+      await sf.setEthUsdFeed(LEV_ID, mockFeed.address, { from: owner });
+      await sf.setEthUsdFeed(LEV_ID, "0x0000000000000000000000000000000000000000", { from: owner });
+      assert.equal(await sf.ethUsdFeed(LEV_ID), "0x0000000000000000000000000000000000000000");
+    });
+
+    it("reverts if token is not a leverage token", async () => {
+      await expectRevert(
+        sf.setEthUsdFeed(999, mockFeed.address, { from: owner }),
+        "not a leverage token"
+      );
+    });
+
+    it("reverts if called by non-owner", async () => {
+      await expectRevert(
+        sf.setEthUsdFeed(LEV_ID, mockFeed.address, { from: alice }),
+        "OwnableUnauthorizedAccount"
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // setEmergencyHealthFloor
+  // ---------------------------------------------------------------------------
+
+  describe("setEmergencyHealthFloor", () => {
+    it("stores floor and emits EmergencyHealthFloorSet", async () => {
+      const tx = await sf.setEmergencyHealthFloor(LEV_ID, toWei("3"), { from: owner });
+      assert.equal((await sf.emergencyHealthFloor(LEV_ID)).toString(), toWei("3"));
+      const ev = tx.logs.find(l => l.event === "EmergencyHealthFloorSet");
+      assert.ok(ev, "EmergencyHealthFloorSet not emitted");
+    });
+
+    it("setting to 0 disables the feature", async () => {
+      await sf.setEmergencyHealthFloor(LEV_ID, 0, { from: owner });
+      assert.equal((await sf.emergencyHealthFloor(LEV_ID)).toString(), "0");
+    });
+
+    it("reverts if not a leverage token", async () => {
+      await expectRevert(
+        sf.setEmergencyHealthFloor(999, toWei("3"), { from: owner }),
+        "not a leverage token"
+      );
+    });
+
+    it("reverts if called by non-owner", async () => {
+      await expectRevert(
+        sf.setEmergencyHealthFloor(LEV_ID, toWei("3"), { from: alice }),
+        "OwnableUnauthorizedAccount"
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // getHealthFactor
+  // ---------------------------------------------------------------------------
+
+  describe("getHealthFactor", () => {
+    it("returns max uint256 when there is no collateral", async () => {
+      await sf.setTiers(99, LEV_TIERS, { from: owner });
+      await sf.setLeverageConfig(99, makeLevCfg(mockAavePool.address, mockStable.address), { from: owner });
+      const hf = await sf.getHealthFactor(99);
+      assert.equal(hf.toString(), new BN(2).pow(new BN(256)).subn(1).toString());
+    });
+
+    it("returns a finite value after leverUp", async () => {
+      const hf = new BN(await sf.getHealthFactor(LEV_ID));
+      assert.ok(hf.lt(new BN(2).pow(new BN(256)).subn(1)), "HF should be finite with debt");
+      assert.ok(hf.gt(new BN(0)), "HF should be > 0");
+    });
+
+    it("returns max uint256 after full leverDown", async () => {
+      await sf.leverDown(LEV_ID, new BN(toWei("0.001")), 0, 3000, "0x", { from: keeperAccount });
+      const hf = await sf.getHealthFactor(LEV_ID);
+      assert.equal(hf.toString(), new BN(2).pow(new BN(256)).subn(1).toString());
+    });
+
+    it("reverts for non-leverage token", async () => {
+      await expectRevert(sf.getHealthFactor(999), "not a leverage token");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // getLeverageInfo — Phase 3 fields
+  // ---------------------------------------------------------------------------
+
+  describe("getLeverageInfo — phase 3 fields", () => {
+    it("emergencyFloor reflects setEmergencyHealthFloor", async () => {
+      await sf.setEmergencyHealthFloor(LEV_ID, toWei("3"), { from: owner });
+      const info = await sf.getLeverageInfo(LEV_ID);
+      assert.equal(info.emergencyFloor.toString(), toWei("3"));
+    });
+
+    it("ethPriceUsd is 0 when no feed is set", async () => {
+      const info = await sf.getLeverageInfo(LEV_ID);
+      assert.equal(info.ethPriceUsd.toString(), "0");
+    });
+
+    it("ethPriceUsd reflects feed price after setEthUsdFeed", async () => {
+      await sf.setEthUsdFeed(LEV_ID, mockFeed.address, { from: owner });
+      const info = await sf.getLeverageInfo(LEV_ID);
+      assert.equal(info.ethPriceUsd.toString(), String(3000e8));
+    });
+
+    it("ethPriceUsd is 0 when feed returns non-positive answer", async () => {
+      await mockFeed.setPrice(0);
+      await sf.setEthUsdFeed(LEV_ID, mockFeed.address, { from: owner });
+      const info = await sf.getLeverageInfo(LEV_ID);
+      assert.equal(info.ethPriceUsd.toString(), "0");
+    });
+
+    it("healthFactor is max uint256 before any leverUp", async () => {
+      // Use a fresh token ID
+      await sf.setTiers(98, LEV_TIERS, { from: owner });
+      await sf.setLeverageConfig(98, makeLevCfg(mockAavePool.address, mockStable.address), { from: owner });
+      const info = await sf.getLeverageInfo(98);
+      assert.equal(info.healthFactor.toString(), new BN(2).pow(new BN(256)).subn(1).toString());
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // emergencyDeleverage
+  // ---------------------------------------------------------------------------
+
+  describe("emergencyDeleverage", () => {
+    beforeEach(async () => {
+      // Set a floor above the current mock HF so emergency condition is met
+      await sf.setEmergencyHealthFloor(LEV_ID, EMERGENCY_FLOOR, { from: owner });
+    });
+
+    it("full deleverage: clears aaveDebt, reduces aaveCollateral, emits EmergencyDeleveraged", async () => {
+      const debtBefore = new BN(await sf.aaveDebt(LEV_ID));
+      assert.ok(debtBefore.gt(new BN(0)), "precondition: debt > 0");
+
+      const tx = await sf.emergencyDeleverage(LEV_ID, 0, 3000, "0x", { from: keeperAccount });
+
+      assert.equal((await sf.aaveDebt(LEV_ID)).toString(), "0");
+
+      const ev = tx.logs.find(l => l.event === "EmergencyDeleveraged");
+      assert.ok(ev, "EmergencyDeleveraged not emitted");
+      assert.equal(ev.args.id.toString(), String(LEV_ID));
+      assert.ok(new BN(ev.args.stableRepaid).gt(new BN(0)));
+      assert.ok(new BN(ev.args.wethWithdrawn).gt(new BN(0)));
+    });
+
+    it("allows owner to trigger emergency deleverage", async () => {
+      await sf.emergencyDeleverage(LEV_ID, 0, 3000, "0x", { from: owner });
+      assert.equal((await sf.aaveDebt(LEV_ID)).toString(), "0");
+    });
+
+    it("divestLeverage succeeds after emergency deleverage", async () => {
+      await sf.emergencyDeleverage(LEV_ID, 0, 3000, "0x", { from: keeperAccount });
+      // Alice can now exit
+      await sf.divestLeverage(LEV_ID, 50, 0, { from: alice });
+      assert.equal((await sf.balanceOf(alice, LEV_ID)).toString(), "50");
+    });
+
+    it("reverts if HF is above the floor (not emergency)", async () => {
+      // Set floor below the current mock HF (~80e18) so condition is NOT met
+      await sf.setEmergencyHealthFloor(LEV_ID, toWei("3"), { from: owner });
+      await expectRevert(
+        sf.emergencyDeleverage(LEV_ID, 0, 3000, "0x", { from: keeperAccount }),
+        "health factor above floor"
+      );
+    });
+
+    it("reverts if floor is 0 (feature disabled)", async () => {
+      await sf.setEmergencyHealthFloor(LEV_ID, 0, { from: owner });
+      await expectRevert(
+        sf.emergencyDeleverage(LEV_ID, 0, 3000, "0x", { from: keeperAccount }),
+        "health factor above floor"
+      );
+    });
+
+    it("reverts if there is no debt", async () => {
+      // Repay debt first
+      await sf.leverDown(LEV_ID, new BN(toWei("0.001")), 0, 3000, "0x", { from: keeperAccount });
+      await expectRevert(
+        sf.emergencyDeleverage(LEV_ID, 0, 3000, "0x", { from: keeperAccount }),
+        "no debt to repay"
+      );
+    });
+
+    it("reverts if called by a non-keeper non-owner address", async () => {
+      await expectRevert(
+        sf.emergencyDeleverage(LEV_ID, 0, 3000, "0x", { from: alice }),
+        "not keeper"
+      );
+    });
+
+    it("reverts if not a leverage token", async () => {
+      await expectRevert(
+        sf.emergencyDeleverage(999, 0, 3000, "0x", { from: keeperAccount }),
+        "not a leverage token"
+      );
+    });
+
+    describe("with Chainlink feed configured", () => {
+      beforeEach(async () => {
+        await sf.setEthUsdFeed(LEV_ID, mockFeed.address, { from: owner });
+      });
+
+      it("succeeds with a fresh valid price", async () => {
+        await sf.emergencyDeleverage(LEV_ID, 0, 3000, "0x", { from: keeperAccount });
+        assert.equal((await sf.aaveDebt(LEV_ID)).toString(), "0");
+      });
+
+      it("reverts if Chainlink price is stale", async () => {
+        // Set updatedAt to 2 hours ago
+        await mockFeed.setUpdatedAt(Math.floor(Date.now() / 1000) - 7201);
+        await expectRevert(
+          sf.emergencyDeleverage(LEV_ID, 0, 3000, "0x", { from: keeperAccount }),
+          "stale price"
+        );
+      });
+
+      it("reverts if Chainlink price is zero or negative", async () => {
+        await mockFeed.setPrice(-1);
+        await expectRevert(
+          sf.emergencyDeleverage(LEV_ID, 0, 3000, "0x", { from: keeperAccount }),
+          "invalid price"
+        );
+      });
+
+      it("proceeds normally when feed is cleared (address zero)", async () => {
+        await sf.setEthUsdFeed(LEV_ID, "0x0000000000000000000000000000000000000000", { from: owner });
+        await sf.emergencyDeleverage(LEV_ID, 0, 3000, "0x", { from: keeperAccount });
+        assert.equal((await sf.aaveDebt(LEV_ID)).toString(), "0");
+      });
+    });
+  });
+});

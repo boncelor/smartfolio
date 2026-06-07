@@ -128,6 +128,14 @@ contract Smartfolio is
         _delegateTo(creditMarketFacet);
     }
 
+    /// @notice Emergency deleverage — keeper or owner callable when HF < floor.
+    function emergencyDeleverage(uint256 id, uint256 minStableOut, uint24 poolFee, bytes calldata swapPath)
+        external nonReentrant
+    {
+        if (msg.sender != keeper && msg.sender != owner()) revert NotKeeper();
+        _delegateTo(creditMarketFacet);
+    }
+
     function deploy(uint256 id, uint256[] calldata amountsOutMinimum)
         external onlyKeeper nonReentrant
     {
@@ -248,6 +256,35 @@ contract Smartfolio is
         emit LeverageConfigSet(id, config.aavePool, config.stableToken, config.targetLtvBps, config.maxLtvBps);
     }
 
+    /**
+     * @notice Set the Chainlink ETH/USD price feed for a leverage token.
+     *         Set to address(0) to disable the price check in emergencyDeleverage.
+     */
+    function setEthUsdFeed(uint256 id, address feed) external onlyOwner {
+        if (!isLeverageToken[id]) revert NotLeverageToken();
+        ethUsdFeed[id] = feed;
+        emit EthUsdFeedSet(id, feed);
+    }
+
+    /**
+     * @notice Set the Aave health factor floor (WAD) below which emergencyDeleverage
+     *         can be triggered. Set to 0 to disable the emergency safety valve.
+     *         Recommended: 3e18 (HF = 3.0) for a 5% LTV position — extremely conservative.
+     */
+    function setEmergencyHealthFloor(uint256 id, uint256 floor) external onlyOwner {
+        if (!isLeverageToken[id]) revert NotLeverageToken();
+        emergencyHealthFloor[id] = floor;
+        emit EmergencyHealthFloorSet(id, floor);
+    }
+
+    /**
+     * @notice Set the maximum Chainlink price age in seconds before it is considered stale.
+     *         Defaults to 3600 (1 hour) if not set.
+     */
+    function setPriceMaxAge(uint256 maxAge) external onlyOwner {
+        priceMaxAge = maxAge;
+    }
+
     // -------------------------------------------------------------------------
     // Admin — facet upgrades
     // -------------------------------------------------------------------------
@@ -333,6 +370,17 @@ contract Smartfolio is
      * @dev    Reads the aggregate position of the Smartfolio proxy across all leverage IDs.
      *         Returns 0 if there is no collateral yet.
      */
+    /**
+     * @notice Returns the Aave health factor for the Smartfolio proxy in WAD (1e18 = 1.0).
+     *         Returns type(uint256).max when there is no debt (no liquidation risk).
+     */
+    function getHealthFactor(uint256 id) external view returns (uint256 healthFactor) {
+        if (!isLeverageToken[id]) revert NotLeverageToken();
+        if (aaveCollateral[id] == 0) return type(uint256).max;
+        LeverageConfig storage cfg = leverageConfig[id];
+        ( , , , , , healthFactor) = IAavePool(cfg.aavePool).getUserAccountData(address(this));
+    }
+
     function checkLtv(uint256 id) external view returns (uint256 ltvBps) {
         if (!isLeverageToken[id]) revert NotLeverageToken();
         if (aaveCollateral[id] == 0) return 0;
@@ -345,8 +393,10 @@ contract Smartfolio is
 
     function getLeverageInfo(uint256 id) external view returns (LeverageInfo memory info) {
         if (!isLeverageToken[id]) revert NotLeverageToken();
-        info.collateralWeth = aaveCollateral[id];
-        info.debtStable = aaveDebt[id];
+        info.collateralWeth  = aaveCollateral[id];
+        info.debtStable      = aaveDebt[id];
+        info.emergencyFloor  = emergencyHealthFloor[id];
+
         if (aaveCollateral[id] > 0) {
             LeverageConfig storage cfg = leverageConfig[id];
             (uint256 totalCollateralBase, uint256 totalDebtBase, , , , uint256 healthFactor)
@@ -355,6 +405,18 @@ contract Smartfolio is
             if (totalCollateralBase > 0) {
                 info.ltvBps = (totalDebtBase * 10_000) / totalCollateralBase;
             }
+        } else {
+            info.healthFactor = type(uint256).max;
+        }
+
+        // Chainlink price — best-effort; returns 0 if feed not set or call fails
+        address feed = ethUsdFeed[id];
+        if (feed != address(0)) {
+            try AggregatorV3Interface(feed).latestRoundData() returns (
+                uint80, int256 answer, uint256, uint256, uint80
+            ) {
+                if (answer > 0) info.ethPriceUsd = uint256(answer);
+            } catch {}
         }
     }
 

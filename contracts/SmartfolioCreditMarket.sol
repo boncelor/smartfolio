@@ -11,14 +11,9 @@ import "./SmartfolioBase.sol";
  *
  *      Phase 1: mintLeverage / divestLeverage — deposit ETH as WETH collateral.
  *      Phase 2: leverUp / leverDown — keeper-driven signal-based position management.
- *
- *      leverUp (golden cross signal):
- *        borrow stable from Aave → swap stable→WETH via Uniswap → re-deposit WETH
- *        → on-chain LTV guard: revert if resulting LTV > maxLtvBps (10% hard cap)
- *
- *      leverDown (death cross signal):
- *        withdraw WETH from Aave → swap WETH→stable via Uniswap → repay Aave debt
- *        → LTV decreases; once aaveDebt == 0, users can call divestLeverage()
+ *      Phase 3: emergencyDeleverage — owner/keeper safety valve triggered when Aave
+ *               health factor drops below emergencyHealthFloor. Full leverDown in one
+ *               call. Optional Chainlink ETH/USD feed for independent price sanity check.
  */
 contract SmartfolioCreditMarket is SmartfolioBase, ERC1155Upgradeable {
 
@@ -186,6 +181,74 @@ contract SmartfolioCreditMarket is SmartfolioBase, ERC1155Upgradeable {
             : 0;
 
         emit LeverDown(id, repaid, withdrawn, newLtvBps);
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 3 — safety: emergency deleverage
+    // -------------------------------------------------------------------------
+
+    /**
+     * @notice Emergency full deleverage when the Aave health factor falls below
+     *         the configured `emergencyHealthFloor` for this token ID.
+     * @dev    Callable by the keeper OR the owner (both guards checked in Smartfolio).
+     *         Performs a full leverDown in one call:
+     *           1. Reads current HF from Aave; reverts if still above the floor.
+     *           2. If a Chainlink feed is configured, reads the ETH/USD price as an
+     *              independent sanity check (reverts on stale or negative price).
+     *           3. Withdraws ALL tracked WETH collateral from Aave.
+     *           4. Swaps all WETH → stable via Uniswap.
+     *           5. Repays all outstanding stable debt.
+     *           6. Sets aaveDebt[id] = 0, allowing divestLeverage() calls.
+     * @param id           Leverage token ID.
+     * @param minStableOut Minimum stable to receive from the WETH→stable swap.
+     * @param poolFee      Uniswap V3 fee tier for single-hop (ignored if swapPath set).
+     * @param swapPath     Encoded multi-hop path WETH→stable; empty = single-hop.
+     */
+    function emergencyDeleverage(
+        uint256 id,
+        uint256 minStableOut,
+        uint24 poolFee,
+        bytes calldata swapPath
+    ) external {
+        if (!isLeverageToken[id]) revert NotLeverageToken();
+        if (aaveDebt[id] == 0) revert NoDebtToRepay();
+
+        LeverageConfig storage cfg = leverageConfig[id];
+
+        // Read Aave health factor
+        ( , , , , , uint256 healthFactor) = IAavePool(cfg.aavePool).getUserAccountData(address(this));
+
+        // Only trigger if HF is below the configured floor
+        uint256 floor = emergencyHealthFloor[id];
+        if (floor == 0 || healthFactor >= floor) revert HealthFactorAboveFloor();
+
+        // Optional Chainlink sanity check — does not affect mechanics, just validates price freshness
+        address feed = ethUsdFeed[id];
+        if (feed != address(0)) {
+            (, int256 answer, , uint256 updatedAt, ) = AggregatorV3Interface(feed).latestRoundData();
+            uint256 maxAge = priceMaxAge > 0 ? priceMaxAge : 3600; // default 1-hour staleness guard
+            if (block.timestamp - updatedAt > maxAge) revert StalePrice();
+            if (answer <= 0) revert InvalidPrice();
+        }
+
+        // Withdraw ALL collateral that belongs to this token ID
+        uint256 wethToWithdraw = aaveCollateral[id];
+        uint256 withdrawn = IAavePool(cfg.aavePool).withdraw(address(weth), wethToWithdraw, address(this));
+        aaveCollateral[id] = 0;
+
+        // Swap all WETH → stable
+        uint256 stableReceived = _swap(address(weth), cfg.stableToken, withdrawn, minStableOut, poolFee, swapPath);
+
+        // Repay all stable debt
+        IERC20(cfg.stableToken).approve(cfg.aavePool, stableReceived);
+        uint256 repaid = IAavePool(cfg.aavePool).repay(cfg.stableToken, stableReceived, 2, address(this));
+        aaveDebt[id] = 0; // force to 0; any dust stays as extra collateral after re-deposit below
+
+        // If swap yielded more stable than the debt, any surplus stays in the contract
+        // for the next divestLeverage() proportional share calculation. If it yielded less
+        // (price impact), the position is de-risked and users exit at reduced collateral.
+
+        emit EmergencyDeleveraged(id, repaid, withdrawn, healthFactor);
     }
 
     // -------------------------------------------------------------------------

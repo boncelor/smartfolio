@@ -10,6 +10,18 @@ interface IWETH9 {
     function balanceOf(address account) external view returns (uint256);
 }
 
+/// @dev Minimal Chainlink V3 aggregator interface for price feed reads.
+interface AggregatorV3Interface {
+    function latestRoundData() external view returns (
+        uint80 roundId,
+        int256 answer,
+        uint256 startedAt,
+        uint256 updatedAt,
+        uint80 answeredInRound
+    );
+    function decimals() external view returns (uint8);
+}
+
 interface IAavePool {
     function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode) external;
     function borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf) external;
@@ -75,6 +87,9 @@ abstract contract SmartfolioBase {
     error NoLeveragePosition();
     error NoDebtToRepay();
     error LtvCapExceeded();
+    error HealthFactorAboveFloor();
+    error StalePrice();
+    error InvalidPrice();
 
     // -------------------------------------------------------------------------
     // Events
@@ -99,6 +114,9 @@ abstract contract SmartfolioBase {
     event LeverageDivested(address indexed account, uint256 indexed id, uint256 amount, uint256 ethReceived);
     event LeverUp(uint256 indexed id, uint256 stableBorrowed, uint256 wethAdded, uint256 newLtvBps);
     event LeverDown(uint256 indexed id, uint256 stableRepaid, uint256 wethWithdrawn, uint256 newLtvBps);
+    event EmergencyDeleveraged(uint256 indexed id, uint256 stableRepaid, uint256 wethWithdrawn, uint256 healthFactor);
+    event EthUsdFeedSet(uint256 indexed id, address feed);
+    event EmergencyHealthFloorSet(uint256 indexed id, uint256 floor);
     event TreasuryFacetSet(address facet);
     event MarketFacetSet(address facet);
     event CreditMarketFacetSet(address facet);
@@ -154,10 +172,12 @@ abstract contract SmartfolioBase {
     }
 
     struct LeverageInfo {
-        uint256 collateralWeth;
-        uint256 debtStable;
-        uint256 ltvBps;
-        uint256 healthFactor;
+        uint256 collateralWeth;   // WETH units in Aave
+        uint256 debtStable;       // stable units borrowed
+        uint256 ltvBps;           // current LTV in bps (Aave oracle)
+        uint256 healthFactor;     // Aave HF in WAD (1e18 = 1.0)
+        uint256 ethPriceUsd;      // ETH/USD price from Chainlink (8 decimals); 0 if no feed
+        uint256 emergencyFloor;   // HF floor below which emergency deleverage is triggered
     }
 
     // -------------------------------------------------------------------------
@@ -215,6 +235,16 @@ abstract contract SmartfolioBase {
     mapping(uint256 => LeverageConfig) public leverageConfig;
     mapping(uint256 => uint256) public aaveCollateral;
     mapping(uint256 => uint256) public aaveDebt;
+
+    /// @dev Chainlink ETH/USD price feed per leverage token ID. Optional — address(0) disables.
+    mapping(uint256 => address) public ethUsdFeed;
+
+    /// @dev Health factor floor in WAD below which emergencyDeleverage() can be called.
+    ///      Default 0 = feature disabled. Recommended: 3e18 (3.0) for an ultra-safe 5% LTV position.
+    mapping(uint256 => uint256) public emergencyHealthFloor;
+
+    /// @dev Max age (in seconds) for a Chainlink price to be considered fresh.
+    uint256 public priceMaxAge;
 
     // -------------------------------------------------------------------------
     // State — facet addresses
