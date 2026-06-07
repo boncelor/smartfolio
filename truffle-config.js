@@ -108,9 +108,10 @@ module.exports = {
     solc: {
       version: "0.8.24",      // Fetch exact version from solc-bin (default: truffle's version)
       settings: {
+        viaIR: true,
         optimizer: {
           enabled: true,
-          runs: 200
+          runs: 1
         },
         evmVersion: "cancun"
       }

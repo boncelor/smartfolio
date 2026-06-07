@@ -3,6 +3,10 @@ const Smartfolio      = artifacts.require("Smartfolio");
 const MockERC20       = artifacts.require("MockERC20");
 const MockWETH        = artifacts.require("MockWETH");
 const MockSwapRouter  = artifacts.require("MockSwapRouter");
+const MockAavePool    = artifacts.require("MockAavePool");
+const SmartfolioTreasury     = artifacts.require("SmartfolioTreasury");
+const SmartfolioMarket       = artifacts.require("SmartfolioMarket");
+const SmartfolioCreditMarket = artifacts.require("SmartfolioCreditMarket");
 
 const BN = web3.utils.BN;
 const toWei = (n, unit = "ether") => web3.utils.toWei(String(n), unit);
@@ -36,10 +40,13 @@ async function expectRevert(promise, message) {
     assert.ok(reverted, `Expected a revert but got: ${err.message}`);
 
     if (message) {
-      // For string-based require messages we can match exactly.
-      // Custom errors may not be decodable by ganache — skip the string check if so.
-      const isCustomErrorRevert = err.message.includes("Custom error");
-      if (!isCustomErrorRevert) {
+      // Custom errors are not decodable by ganache — they appear as a plain "revert"
+      // with no message body, or as "Custom error (could not decode)".
+      // Either way, skip string matching; just verifying the revert happened is enough.
+      const isCustomError =
+        err.message.includes("Custom error") ||
+        /revert\s*$/.test(err.message.trim());
+      if (!isCustomError) {
         assert(
           err.message.includes(message),
           `Expected "${message}" but got: ${err.message}`
@@ -55,7 +62,10 @@ contract("Smartfolio", (accounts) => {
   let sf;
 
   beforeEach(async () => {
-    sf = await deployProxy(Smartfolio, [owner], { kind: "uups" });
+    const treasury     = await SmartfolioTreasury.new();
+    const market       = await SmartfolioMarket.new();
+    const creditMarket = await SmartfolioCreditMarket.new();
+    sf = await deployProxy(Smartfolio, [owner, treasury.address, market.address, creditMarket.address], { kind: "uups" });
     await sf.setTiers(TOKEN_ID, TIERS, { from: owner });
   });
 
@@ -78,7 +88,7 @@ contract("Smartfolio", (accounts) => {
     });
 
     it("reverts if initialize is called again", async () => {
-      await expectRevert(sf.initialize(owner, { from: owner }), "InvalidInitialization");
+      await expectRevert(sf.initialize(owner, sf.address, sf.address, sf.address, { from: owner }), "InvalidInitialization");
     });
   });
 
@@ -853,7 +863,10 @@ contract("Smartfolio", (accounts) => {
 
     beforeEach(async () => {
       // Deploy contracts
-      sf         = await deployProxy(Smartfolio, [owner], { kind: "uups" });
+      const treasuryFacet2     = await SmartfolioTreasury.new();
+      const marketFacet2       = await SmartfolioMarket.new();
+      const creditMarketFacet2 = await SmartfolioCreditMarket.new();
+      sf         = await deployProxy(Smartfolio, [owner, treasuryFacet2.address, marketFacet2.address, creditMarketFacet2.address], { kind: "uups" });
       tokenA     = await MockERC20.new("Token A", "TKA");
       tokenB     = await MockERC20.new("Token B", "TKB");
       mockWETH   = await MockWETH.new();
@@ -953,7 +966,10 @@ contract("Smartfolio", (accounts) => {
       });
 
       it("reverts if router is not set", async () => {
-        const sf2 = await deployProxy(Smartfolio, [owner], { kind: "uups" });
+        const t2 = await SmartfolioTreasury.new();
+        const m2 = await SmartfolioMarket.new();
+        const c2 = await SmartfolioCreditMarket.new();
+        const sf2 = await deployProxy(Smartfolio, [owner, t2.address, m2.address, c2.address], { kind: "uups" });
         await sf2.setTiers(TOKEN_ID, TIERS, { from: owner });
         await sf2.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address), { from: owner });
         await sf2.setKeeper(keeper, { from: owner });
@@ -1061,7 +1077,10 @@ contract("Smartfolio", (accounts) => {
     ];
 
     beforeEach(async () => {
-      sf         = await deployProxy(Smartfolio, [owner], { kind: "uups" });
+      const treasuryFacet3     = await SmartfolioTreasury.new();
+      const marketFacet3       = await SmartfolioMarket.new();
+      const creditMarketFacet3 = await SmartfolioCreditMarket.new();
+      sf         = await deployProxy(Smartfolio, [owner, treasuryFacet3.address, marketFacet3.address, creditMarketFacet3.address], { kind: "uups" });
       tokenA     = await MockERC20.new("Token A", "TKA");
       tokenB     = await MockERC20.new("Token B", "TKB");
       mockWETH   = await MockWETH.new();
@@ -1272,6 +1291,370 @@ contract("Smartfolio", (accounts) => {
           `deployedEth should halve; got ${deployedAfter}, expected ~${expected}`
         );
       });
+    });
+  });
+});
+
+// =============================================================================
+// Leverage Phase 1 — Aave collateral management
+// =============================================================================
+
+contract("Smartfolio — leverage Phase 1", (accounts) => {
+  const [owner, alice, bob] = accounts;
+
+  let sf, mockWETH, mockAavePool, mockStable;
+
+  const LEV_ID = 10; // leverage token ID (separate from regular TOKEN_ID = 1)
+
+  const makeLevCfg = (pool, stable) => ({
+    aavePool:     pool,
+    stableToken:  stable,
+    targetLtvBps: 500,  // 5%
+    maxLtvBps:    1000, // 10%
+  });
+
+  beforeEach(async () => {
+    const treasuryFacet     = await SmartfolioTreasury.new();
+    const marketFacet       = await SmartfolioMarket.new();
+    const creditMarketFacet = await SmartfolioCreditMarket.new();
+    sf           = await deployProxy(Smartfolio, [owner, treasuryFacet.address, marketFacet.address, creditMarketFacet.address], { kind: "uups" });
+    mockWETH     = await MockWETH.new();
+    mockAavePool = await MockAavePool.new();
+    mockStable   = await MockERC20.new("USD Coin", "USDC");
+
+    await sf.setWETH(mockWETH.address, { from: owner });
+    await sf.setTiers(LEV_ID, TIERS, { from: owner });
+    await sf.setLeverageConfig(LEV_ID, makeLevCfg(mockAavePool.address, mockStable.address), { from: owner });
+  });
+
+  // ---------------------------------------------------------------------------
+  // setLeverageConfig
+  // ---------------------------------------------------------------------------
+
+  describe("setLeverageConfig", () => {
+    it("stores config, sets isLeverageToken, emits LeverageConfigSet", async () => {
+      assert.equal(await sf.isLeverageToken(LEV_ID), true);
+      const cfg = await sf.leverageConfig(LEV_ID);
+      assert.equal(cfg.aavePool,      mockAavePool.address);
+      assert.equal(cfg.stableToken,   mockStable.address);
+      assert.equal(cfg.targetLtvBps.toString(), "500");
+      assert.equal(cfg.maxLtvBps.toString(),    "1000");
+    });
+
+    it("reverts if aavePool is zero address", async () => {
+      await expectRevert(
+        sf.setLeverageConfig(99, makeLevCfg(
+          "0x0000000000000000000000000000000000000000",
+          mockStable.address
+        ), { from: owner }),
+        "zero aavePool"
+      );
+    });
+
+    it("reverts if stableToken is zero address", async () => {
+      await expectRevert(
+        sf.setLeverageConfig(99, makeLevCfg(
+          mockAavePool.address,
+          "0x0000000000000000000000000000000000000000"
+        ), { from: owner }),
+        "zero stableToken"
+      );
+    });
+
+    it("reverts if targetLtvBps is zero", async () => {
+      await expectRevert(
+        sf.setLeverageConfig(99, {
+          aavePool:     mockAavePool.address,
+          stableToken:  mockStable.address,
+          targetLtvBps: 0,
+          maxLtvBps:    1000,
+        }, { from: owner }),
+        "zero targetLtv"
+      );
+    });
+
+    it("reverts if targetLtvBps > maxLtvBps", async () => {
+      await expectRevert(
+        sf.setLeverageConfig(99, {
+          aavePool:     mockAavePool.address,
+          stableToken:  mockStable.address,
+          targetLtvBps: 900,
+          maxLtvBps:    500,
+        }, { from: owner }),
+        "targetLtv > maxLtv"
+      );
+    });
+
+    it("reverts if maxLtvBps exceeds 1000 (10%)", async () => {
+      await expectRevert(
+        sf.setLeverageConfig(99, {
+          aavePool:     mockAavePool.address,
+          stableToken:  mockStable.address,
+          targetLtvBps: 500,
+          maxLtvBps:    1001,
+        }, { from: owner }),
+        "maxLtv exceeds 10%"
+      );
+    });
+
+    it("reverts if token already has circulating supply", async () => {
+      const cost = await sf.mintCost(LEV_ID, 1);
+      await sf.mintLeverage(LEV_ID, 1, "0x", { from: alice, value: cost });
+      await expectRevert(
+        sf.setLeverageConfig(LEV_ID, makeLevCfg(mockAavePool.address, mockStable.address), { from: owner }),
+        "token has supply"
+      );
+    });
+
+    it("reverts if called by non-owner", async () => {
+      await expectRevert(
+        sf.setLeverageConfig(99, makeLevCfg(mockAavePool.address, mockStable.address), { from: alice }),
+        "OwnableUnauthorizedAccount"
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // mintLeverage
+  // ---------------------------------------------------------------------------
+
+  describe("mintLeverage", () => {
+    it("mints tokens, updates aaveCollateral, deposits WETH to Aave, emits LeverageMinted", async () => {
+      const cost = await sf.mintCost(LEV_ID, 10);
+      const tx   = await sf.mintLeverage(LEV_ID, 10, "0x", { from: alice, value: cost });
+
+      assert.equal((await sf.balanceOf(alice, LEV_ID)).toString(), "10");
+      assert.equal((await sf.totalSupply(LEV_ID)).toString(), "10");
+      assert.equal((await sf.totalMinted(LEV_ID)).toString(), "10");
+      assert.equal((await sf.aaveCollateral(LEV_ID)).toString(), cost.toString());
+      // reserve stays 0 — ETH lives in Aave, not here
+      assert.equal((await sf.reserve(LEV_ID)).toString(), "0");
+      // MockAavePool holds the WETH
+      assert.equal((await mockWETH.balanceOf(mockAavePool.address)).toString(), cost.toString());
+
+      const ev = tx.logs.find(l => l.event === "LeverageMinted");
+      assert.ok(ev, "LeverageMinted event not emitted");
+      assert.equal(ev.args.account, alice);
+      assert.equal(ev.args.id.toString(), String(LEV_ID));
+      assert.equal(ev.args.amount.toString(), "10");
+      assert.equal(ev.args.ethDeposited.toString(), cost.toString());
+    });
+
+    it("refunds excess ETH", async () => {
+      const cost  = await sf.mintCost(LEV_ID, 1);
+      const extra = new BN(toWei("0.5"));
+      const before = new BN(await web3.eth.getBalance(alice));
+      await sf.mintLeverage(LEV_ID, 1, "0x", { from: alice, value: cost.add(extra) });
+      const after = new BN(await web3.eth.getBalance(alice));
+      // Net spend should be cost + gas (gas < 0.01 ETH), excess is refunded
+      const gasTolerance = new BN(toWei("0.01"));
+      const netSpend = before.sub(after);
+      assert.ok(netSpend.gte(cost), "alice should have spent at least the cost");
+      assert.ok(netSpend.lte(cost.add(gasTolerance)), "alice should not have spent more than cost + gas");
+    });
+
+    it("cumulative: second mint adds to aaveCollateral", async () => {
+      const cost1 = await sf.mintCost(LEV_ID, 10);
+      await sf.mintLeverage(LEV_ID, 10, "0x", { from: alice, value: cost1 });
+      const cost2 = await sf.mintCost(LEV_ID, 5);
+      await sf.mintLeverage(LEV_ID, 5, "0x", { from: bob, value: cost2 });
+
+      const expected = cost1.add(cost2);
+      assert.equal((await sf.aaveCollateral(LEV_ID)).toString(), expected.toString());
+    });
+
+    it("reverts if not a leverage token", async () => {
+      await expectRevert(
+        sf.mintLeverage(999, 1, "0x", { from: alice, value: toWei("1") }),
+        "not a leverage token"
+      );
+    });
+
+    it("reverts if amount is zero", async () => {
+      await expectRevert(
+        sf.mintLeverage(LEV_ID, 0, "0x", { from: alice, value: 0 }),
+        "amount must be > 0"
+      );
+    });
+
+    it("reverts if ETH is insufficient", async () => {
+      const cost = await sf.mintCost(LEV_ID, 10);
+      await expectRevert(
+        sf.mintLeverage(LEV_ID, 10, "0x", { from: alice, value: cost.subn(1) }),
+        "insufficient ETH"
+      );
+    });
+
+    it("reverts if maxSupply is exceeded", async () => {
+      await sf.setMaxSupply(LEV_ID, 5, { from: owner });
+      const cost = await sf.mintCost(LEV_ID, 6);
+      await expectRevert(
+        sf.mintLeverage(LEV_ID, 6, "0x", { from: alice, value: cost }),
+        "exceeds max supply"
+      );
+    });
+
+    it("reverts when paused", async () => {
+      const cost = await sf.mintCost(LEV_ID, 1);
+      await sf.pause({ from: owner });
+      await expectRevert(
+        sf.mintLeverage(LEV_ID, 1, "0x", { from: alice, value: cost }),
+        "EnforcedPause"
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // divestLeverage
+  // ---------------------------------------------------------------------------
+
+  describe("divestLeverage", () => {
+    let mintCost100;
+
+    beforeEach(async () => {
+      mintCost100 = await sf.mintCost(LEV_ID, 100);
+      await sf.mintLeverage(LEV_ID, 100, "0x", { from: alice, value: mintCost100 });
+    });
+
+    it("burns tokens, withdraws from Aave, returns ETH, emits LeverageDivested", async () => {
+      const collBefore   = new BN(await sf.aaveCollateral(LEV_ID));
+      const balBefore    = new BN(await web3.eth.getBalance(alice));
+
+      const tx = await sf.divestLeverage(LEV_ID, 50, 0, { from: alice });
+
+      assert.equal((await sf.balanceOf(alice, LEV_ID)).toString(), "50");
+      assert.equal((await sf.totalSupply(LEV_ID)).toString(), "50");
+
+      const collAfter = new BN(await sf.aaveCollateral(LEV_ID));
+      assert.ok(
+        collAfter.sub(collBefore.divn(2)).abs().lten(1),
+        "aaveCollateral should halve"
+      );
+
+      const balAfter = new BN(await web3.eth.getBalance(alice));
+      assert.ok(balAfter.gt(balBefore), "alice should receive ETH");
+
+      const ev = tx.logs.find(l => l.event === "LeverageDivested");
+      assert.ok(ev, "LeverageDivested event not emitted");
+      assert.equal(ev.args.account, alice);
+      assert.equal(ev.args.id.toString(), String(LEV_ID));
+      assert.equal(ev.args.amount.toString(), "50");
+    });
+
+    it("full exit: all tokens burned, aaveCollateral reaches 0", async () => {
+      await sf.divestLeverage(LEV_ID, 100, 0, { from: alice });
+      assert.equal((await sf.totalSupply(LEV_ID)).toString(), "0");
+      assert.equal((await sf.aaveCollateral(LEV_ID)).toString(), "0");
+    });
+
+    it("ETH received is approximately original cost (within gas)", async () => {
+      const gasTolerance = new BN(toWei("0.01")); // up to 0.01 ETH in gas fees
+      const balBefore = new BN(await web3.eth.getBalance(alice));
+      await sf.divestLeverage(LEV_ID, 100, 0, { from: alice });
+      const balAfter = new BN(await web3.eth.getBalance(alice));
+      const net = balAfter.sub(balBefore); // positive: ETH received minus gas paid
+      assert.ok(net.add(gasTolerance).gte(mintCost100), "should receive close to original cost");
+    });
+
+    it("two holders divest proportionally without affecting each other", async () => {
+      const costBob = await sf.mintCost(LEV_ID, 100);
+      await sf.mintLeverage(LEV_ID, 100, "0x", { from: bob, value: costBob });
+
+      const totalColl = new BN(await sf.aaveCollateral(LEV_ID));
+      const totalSup  = new BN(await sf.totalSupply(LEV_ID)); // 200
+
+      // Alice exits her 100 (50% of supply)
+      const aliceShare = totalColl.muln(100).div(totalSup);
+      const balBefore  = new BN(await web3.eth.getBalance(alice));
+      await sf.divestLeverage(LEV_ID, 100, 0, { from: alice });
+      const balAfter = new BN(await web3.eth.getBalance(alice));
+
+      // Net to alice: aliceShare minus gas fees (allow up to 0.01 ETH gas)
+      const gasTolerance = new BN(toWei("0.01"));
+      const received = balAfter.sub(balBefore);
+      assert.ok(received.add(gasTolerance).gte(aliceShare), "alice should receive close to her pro-rata share");
+      assert.ok(received.lte(aliceShare.add(new BN(1))), "alice should not receive more than her share");
+      // Bob's tokens still intact
+      assert.equal((await sf.balanceOf(bob, LEV_ID)).toString(), "100");
+    });
+
+    it("reverts if minEthOut is not satisfied", async () => {
+      await expectRevert(
+        sf.divestLeverage(LEV_ID, 1, toWei("999"), { from: alice }),
+        "insufficient ETH out"
+      );
+    });
+
+    it("reverts if not a leverage token", async () => {
+      await expectRevert(
+        sf.divestLeverage(999, 1, 0, { from: alice }),
+        "not a leverage token"
+      );
+    });
+
+    it("reverts if amount is zero", async () => {
+      await expectRevert(
+        sf.divestLeverage(LEV_ID, 0, 0, { from: alice }),
+        "amount must be > 0"
+      );
+    });
+
+    it("reverts if balance is insufficient", async () => {
+      await expectRevert(
+        sf.divestLeverage(LEV_ID, 101, 0, { from: alice }),
+        "insufficient balance"
+      );
+    });
+
+    it("aaveDebt is 0 in Phase 1 (no borrowing yet)", async () => {
+      assert.equal((await sf.aaveDebt(LEV_ID)).toString(), "0");
+    });
+
+    it("reverts when paused", async () => {
+      await sf.pause({ from: owner });
+      await expectRevert(
+        sf.divestLeverage(LEV_ID, 1, 0, { from: alice }),
+        "EnforcedPause"
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // getLeverageInfo
+  // ---------------------------------------------------------------------------
+
+  describe("getLeverageInfo", () => {
+    it("returns zero collateral and debt before any mint", async () => {
+      const info = await sf.getLeverageInfo(LEV_ID);
+      assert.equal(info.collateralWeth.toString(), "0");
+      assert.equal(info.debtStable.toString(), "0");
+      assert.equal(info.ltvBps.toString(), "0");
+    });
+
+    it("returns updated collateral after mint", async () => {
+      const cost = await sf.mintCost(LEV_ID, 10);
+      await sf.mintLeverage(LEV_ID, 10, "0x", { from: alice, value: cost });
+      const info = await sf.getLeverageInfo(LEV_ID);
+      assert.equal(info.collateralWeth.toString(), cost.toString());
+      assert.equal(info.debtStable.toString(), "0");
+    });
+
+    it("collateralWeth decreases after partial divest", async () => {
+      const cost = await sf.mintCost(LEV_ID, 100);
+      await sf.mintLeverage(LEV_ID, 100, "0x", { from: alice, value: cost });
+      await sf.divestLeverage(LEV_ID, 50, 0, { from: alice });
+      const info = await sf.getLeverageInfo(LEV_ID);
+      assert.ok(
+        new BN(info.collateralWeth).sub(cost.divn(2)).abs().lten(1),
+        "collateralWeth should halve after 50% exit"
+      );
+    });
+
+    it("reverts if called on a non-leverage token", async () => {
+      await expectRevert(
+        sf.getLeverageInfo(TOKEN_ID),
+        "not a leverage token"
+      );
     });
   });
 });
