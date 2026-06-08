@@ -18,6 +18,17 @@ function resolveAddress(): `0x${string}` {
 
 export const CONTRACT_ADDRESS: `0x${string}` = resolveAddress()
 
+// Factory address — set VITE_FACTORY_ADDRESS after deploying SmartfolioTokenFactory
+function resolveFactoryAddress(): `0x${string}` {
+  const envAddr = import.meta.env.VITE_FACTORY_ADDRESS as string | undefined
+  if (envAddr && envAddr.startsWith('0x') && envAddr.length === 42) {
+    return envAddr as `0x${string}`
+  }
+  return '0x0000000000000000000000000000000000000000'
+}
+
+export const FACTORY_ADDRESS: `0x${string}` = resolveFactoryAddress()
+
 export const SMARTFOLIO_ABI = [
   // View functions
   {
@@ -32,7 +43,7 @@ export const SMARTFOLIO_ABI = [
         components: [
           { name: 'circulatingSupply', type: 'uint256' },
           { name: 'totalMinted', type: 'uint256' },
-          { name: 'maxSupply', type: 'uint256' },
+
           { name: 'reserve', type: 'uint256' },
           { name: 'backingPerToken', type: 'uint256' },
           { name: 'currentTierIndex', type: 'uint256' },
@@ -306,6 +317,27 @@ export const SMARTFOLIO_ABI = [
     ],
     outputs: [],
   },
+  // ERC1155 approval (needed for wrapping)
+  {
+    name: 'setApprovalForAll',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'operator', type: 'address' },
+      { name: 'approved', type: 'bool' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'isApprovedForAll',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'account', type: 'address' },
+      { name: 'operator', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
   // Events
   {
     name: 'Minted',
@@ -336,6 +368,77 @@ export const SMARTFOLIO_ABI = [
       { name: 'id', type: 'uint256', indexed: true },
       { name: 'amount', type: 'uint256', indexed: false },
       { name: 'ethReceived', type: 'uint256', indexed: false },
+    ],
+  },
+] as const
+
+export const FACTORY_ABI = [
+  {
+    name: 'wrappers',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'id', type: 'uint256' }],
+    outputs: [{ name: '', type: 'address' }],
+  },
+] as const
+
+export const SMARTFOLIO_TOKEN_ABI = [
+  {
+    name: 'wrap',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: [],
+  },
+  {
+    name: 'unwrap',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: [],
+  },
+  {
+    name: 'balanceOf',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'name',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'string' }],
+  },
+  {
+    name: 'symbol',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'string' }],
+  },
+  {
+    name: 'totalSupply',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'Wrapped',
+    type: 'event',
+    inputs: [
+      { name: 'account', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    name: 'Unwrapped',
+    type: 'event',
+    inputs: [
+      { name: 'account', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
     ],
   },
 ] as const

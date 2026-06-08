@@ -45,7 +45,6 @@ abstract contract SmartfolioBase {
 
     error ReentrantCall();
     error AmountZero();
-    error ExceedsMaxSupply();
     error InsufficientETH();
     error InsufficientBalance();
     error ETHTransferFailed();
@@ -133,7 +132,7 @@ abstract contract SmartfolioBase {
     struct TokenInfo {
         uint256 circulatingSupply;
         uint256 totalMinted;
-        uint256 maxSupply;
+
         uint256 reserve;
         uint256 backingPerToken;
         uint256 currentTierIndex;
@@ -217,7 +216,7 @@ abstract contract SmartfolioBase {
     mapping(uint256 => uint256) public totalMinted;
     mapping(uint256 => uint256) public totalSupply;
     mapping(uint256 => uint256) public reserve;
-    mapping(uint256 => uint256) public maxSupply;
+
     uint256 public maxBurnFeeRate;
     address public treasury;
 

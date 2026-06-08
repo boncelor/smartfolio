@@ -9,8 +9,9 @@ import LeverageInfoCard from './components/LeverageInfoCard'
 import MintLeverageForm from './components/MintLeverageForm'
 import DivestLeverageForm from './components/DivestLeverageForm'
 import KeeperPanel from './components/KeeperPanel'
+import WrapUnwrapPanel from './components/WrapUnwrapPanel'
 
-type Tab = 'mint' | 'burn' | 'divest' | 'leverage'
+type Tab = 'mint' | 'burn' | 'divest' | 'leverage' | 'wrap'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
@@ -19,6 +20,7 @@ const TAB_LABELS: Record<Tab, string> = {
   burn:     'Burn',
   divest:   'Divest',
   leverage: 'Leverage',
+  wrap:     'Wrap / Unwrap',
 }
 
 export default function App() {
@@ -78,9 +80,7 @@ export default function App() {
                 onClick={() => setActiveTab(tab)}
                 className={`px-6 py-3 text-sm font-semibold transition-colors ${
                   activeTab === tab
-                    ? tab === 'leverage'
-                      ? 'tab-active-gold'
-                      : 'tab-active-green'
+                    ? tab === 'leverage' ? 'tab-active-gold' : 'tab-active-green'
                     : 'tab-inactive'
                 }`}
               >
@@ -101,6 +101,7 @@ export default function App() {
               <KeeperPanel tokenId={tokenId} />
             </div>
           )}
+          {activeTab === 'wrap' && <WrapUnwrapPanel tokenId={tokenId} />}
         </div>
       </main>
     </div>

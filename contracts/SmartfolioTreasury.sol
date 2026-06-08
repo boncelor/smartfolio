@@ -21,9 +21,6 @@ contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
         uint256 amount,
         bytes memory data
     ) external payable {
-        uint256 cap = maxSupply[id];
-        if (cap != 0 && totalSupply[id] + amount > cap) revert ExceedsMaxSupply();
-
         uint256 cost = _mintCost(id, amount);
         if (msg.value < cost) revert InsufficientETH();
 
@@ -50,21 +47,30 @@ contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
         if (ids.length != amounts.length) revert LengthMismatch();
 
         uint256 totalCost;
+        uint256[] memory costs = new uint256[](ids.length);
+
         for (uint256 i = 0; i < ids.length; i++) {
-            uint256 cap = maxSupply[ids[i]];
-            if (cap != 0 && totalSupply[ids[i]] + amounts[i] > cap) revert ExceedsMaxSupply();
-            totalCost += _mintCost(ids[i], amounts[i]);
+            uint256 id = ids[i];
+            uint256 amount = amounts[i];
+
+            uint256 cost = _mintCost(id, amount);
+            costs[i] = cost;
+            totalCost += cost;
+
+            // Update state immediately so duplicate IDs within the same batch
+            // see correct totalMinted/totalSupply on subsequent iterations.
+            totalMinted[id] += amount;
+            totalSupply[id] += amount;
+            reserve[id] += cost;
         }
+
         if (msg.value < totalCost) revert InsufficientETH();
 
-        for (uint256 i = 0; i < ids.length; i++) {
-            uint256 cost = _mintCost(ids[i], amounts[i]);
-            totalMinted[ids[i]] += amounts[i];
-            totalSupply[ids[i]] += amounts[i];
-            reserve[ids[i]] += cost;
-        }
-
         _mintBatch(to, ids, amounts, data);
+
+        for (uint256 i = 0; i < ids.length; i++) {
+            emit Minted(to, ids[i], amounts[i], costs[i]);
+        }
 
         uint256 excess = msg.value - totalCost;
         if (excess > 0) {

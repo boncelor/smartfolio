@@ -236,21 +236,7 @@ contract("Smartfolio", (accounts) => {
       assert.equal((await sf.balanceOf(alice, TOKEN_ID)).toString(), "1");
     });
 
-    it("reverts when maxSupply is exceeded", async () => {
-      await sf.setMaxSupply(TOKEN_ID, 5, { from: owner });
-      const cost = await sf.mintCost(TOKEN_ID, 6);
-      await expectRevert(
-        sf.mint(alice, TOKEN_ID, 6, "0x", { from: alice, value: cost }),
-        "exceeds max supply"
-      );
-    });
 
-    it("allows mint up to maxSupply exactly", async () => {
-      await sf.setMaxSupply(TOKEN_ID, 5, { from: owner });
-      const cost = await sf.mintCost(TOKEN_ID, 5);
-      await sf.mint(alice, TOKEN_ID, 5, "0x", { from: alice, value: cost });
-      assert.equal((await sf.totalSupply(TOKEN_ID)).toString(), "5");
-    });
   });
 
   // ---------------------------------------------------------------------------
@@ -286,18 +272,7 @@ contract("Smartfolio", (accounts) => {
       );
     });
 
-    it("reverts if any token in batch exceeds maxSupply", async () => {
-      await sf.setMaxSupply(ID_B, 2, { from: owner });
-      const costA = await sf.mintCost(ID_A, 5);
-      const costB = await sf.mintCost(ID_B, 3);
-      await expectRevert(
-        sf.mintBatch(alice, [ID_A, ID_B], [5, 3], "0x", {
-          from: alice,
-          value: new BN(costA).add(new BN(costB)),
-        }),
-        "exceeds max supply"
-      );
-    });
+
   });
 
   // ---------------------------------------------------------------------------
@@ -527,27 +502,6 @@ contract("Smartfolio", (accounts) => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // setMaxSupply
-  // ---------------------------------------------------------------------------
-
-  describe("setMaxSupply", () => {
-    it("sets and emits MaxSupplySet", async () => {
-      const tx = await sf.setMaxSupply(TOKEN_ID, 500, { from: owner });
-      assert.equal((await sf.maxSupply(TOKEN_ID)).toString(), "500");
-      const log = tx.logs.find((l) => l.event === "MaxSupplySet");
-      assert.ok(log);
-      assert.equal(log.args.cap.toString(), "500");
-    });
-
-    it("cap of 0 removes the limit", async () => {
-      await sf.setMaxSupply(TOKEN_ID, 5, { from: owner });
-      await sf.setMaxSupply(TOKEN_ID, 0, { from: owner });
-      const cost = await sf.mintCost(TOKEN_ID, 100);
-      await sf.mint(alice, TOKEN_ID, 100, "0x", { from: alice, value: cost });
-      assert.equal((await sf.totalSupply(TOKEN_ID)).toString(), "100");
-    });
-  });
 
   // ---------------------------------------------------------------------------
   // tokenInfo
@@ -580,11 +534,7 @@ contract("Smartfolio", (accounts) => {
       assert.equal(info.backingPerToken.toString(), expected.toString());
     });
 
-    it("reports maxSupply if set", async () => {
-      await sf.setMaxSupply(TOKEN_ID, 500, { from: owner });
-      const info = await sf.tokenInfo(TOKEN_ID);
-      assert.equal(info.maxSupply.toString(), "500");
-    });
+
   });
 
   // ---------------------------------------------------------------------------
@@ -1485,14 +1435,6 @@ contract("Smartfolio — leverage Phase 1", (accounts) => {
       );
     });
 
-    it("reverts if maxSupply is exceeded", async () => {
-      await sf.setMaxSupply(LEV_ID, 5, { from: owner });
-      const cost = await sf.mintCost(LEV_ID, 6);
-      await expectRevert(
-        sf.mintLeverage(LEV_ID, 6, "0x", { from: alice, value: cost }),
-        "exceeds max supply"
-      );
-    });
 
     it("reverts when paused", async () => {
       const cost = await sf.mintCost(LEV_ID, 1);

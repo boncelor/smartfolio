@@ -180,10 +180,6 @@ contract Smartfolio is
         emit TiersSet(id, tiers);
     }
 
-    function setMaxSupply(uint256 id, uint256 cap) external onlyOwner {
-        maxSupply[id] = cap;
-        emit MaxSupplySet(id, cap);
-    }
 
     function setMaxBurnFeeRate(uint256 rate) external onlyOwner {
         if (rate > MAX_BURN_FEE_CAP) revert ExceedsHardCap();
@@ -345,7 +341,7 @@ contract Smartfolio is
         uint256 minted = totalMinted[id];
         info.circulatingSupply = supply;
         info.totalMinted = minted;
-        info.maxSupply = maxSupply[id];
+
         info.reserve = reserve[id];
         info.backingPerToken = supply > 0 ? (reserve[id] * WAD) / supply : 0;
         TierConfig[] storage tiers = _getTiers(id);
