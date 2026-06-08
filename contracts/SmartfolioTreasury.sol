@@ -27,6 +27,8 @@ contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
         totalMinted[id] += amount;
         totalSupply[id] += amount;
         reserve[id] += cost;
+        globalTotalMinted += amount;
+        globalTotalSupply += amount;
 
         _mint(account, id, amount, data);
         emit Minted(account, id, amount, cost);
@@ -62,6 +64,8 @@ contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
             totalMinted[id] += amount;
             totalSupply[id] += amount;
             reserve[id] += cost;
+            globalTotalMinted += amount;
+            globalTotalSupply += amount;
         }
 
         if (msg.value < totalCost) revert InsufficientETH();
@@ -87,6 +91,7 @@ contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
         (, uint256 fee, uint256 net) = _burnRefund(id, amount);
 
         totalSupply[id] -= amount;
+        globalTotalSupply -= amount;
         if (treasury != address(0)) {
             reserve[id] -= (net + fee);
         } else {

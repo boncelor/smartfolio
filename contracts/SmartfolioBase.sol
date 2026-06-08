@@ -216,6 +216,8 @@ abstract contract SmartfolioBase {
     mapping(uint256 => uint256) public totalMinted;
     mapping(uint256 => uint256) public totalSupply;
     mapping(uint256 => uint256) public reserve;
+    uint256 public globalTotalMinted;
+    uint256 public globalTotalSupply;
 
     uint256 public maxBurnFeeRate;
     address public treasury;
@@ -304,7 +306,7 @@ abstract contract SmartfolioBase {
         if (tiers.length == 0) revert TiersNotConfigured();
         if (amount == 0) revert AmountZero();
 
-        uint256 supply = totalMinted[id];
+        uint256 supply = globalTotalSupply;
         uint256 remaining = amount;
         uint256 lastTier = tiers.length - 1;
 
@@ -326,7 +328,7 @@ abstract contract SmartfolioBase {
     }
 
     function _burnFeeRate(uint256 id, uint256 amount) internal view returns (uint256) {
-        uint256 supply = totalSupply[id];
+        uint256 supply = globalTotalSupply;
         if (supply == 0) revert NoSupply();
         if (amount > supply) revert AmountExceedsSupply();
         uint256 proportion = (amount * WAD) / supply;
