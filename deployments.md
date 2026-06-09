@@ -10,5 +10,13 @@
 | SmartfolioCreditMarket | `0x9101e9C4f588b0148914997213ce15d531Ae5dfF` |
 | SmartfolioLiquidityMarket | `0x2a43ba05692d0fEECF7Eed99970db3ceaB96C6a7` |
 | SmartfolioTokenFactory | `0xcc2f5866857C691492A38463929e56c43635A14f` |
+| SmartfolioERC20 (SMF) | `0x1b29D25723045DF0E63905AD1996708Af3f33b93` |
+
+### Upgrade — 2026-06-09
+
+| Contract | Address |
+|---|---|
+| Smartfolio (new impl) | `0xd3a479dE66D29E5C7ED375bAb0E4FDE0dBc9846C` |
+| SmartfolioTreasury (new) | `0x9a6E0CaA39aAd5Fb29F8B92806aEcfCC8b10465E` |
 
 Deployed from `0x08dfc68914fF456cD01056488F071C077FbF26E1` on 2026-06-09.
