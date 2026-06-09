@@ -28,6 +28,25 @@ const TAB_LABELS: Record<Tab, string> = {
   wrap:     'Wrap / Unwrap',
 }
 
+function TokenIdInput({ tokenId, setTokenId }: { tokenId: number; setTokenId: (v: number) => void }) {
+  return (
+    <div className="flex items-center gap-4">
+      <label htmlFor="token-id" className="stat-label whitespace-nowrap" style={{ fontSize: '0.8125rem' }}>
+        Token ID
+      </label>
+      <input
+        id="token-id"
+        type="number"
+        min={1}
+        value={tokenId}
+        onChange={(e) => setTokenId(Math.max(1, parseInt(e.target.value) || 1))}
+        className="input-money"
+        style={{ width: '7rem' }}
+      />
+    </div>
+  )
+}
+
 export default function App() {
   const [tokenId, setTokenId] = useState<number>(1)
   const [activeTab, setActiveTab] = useState<Tab>('smf')
@@ -58,25 +77,6 @@ export default function App() {
       <main className="flex-1 flex justify-center px-4 py-8">
         <div className="w-full max-w-2xl space-y-6">
 
-          {/* Token ID input */}
-          <div className="flex items-center gap-4">
-            <label htmlFor="token-id" className="stat-label whitespace-nowrap" style={{ fontSize: '0.8125rem' }}>
-              Token ID
-            </label>
-            <input
-              id="token-id"
-              type="number"
-              min={1}
-              value={tokenId}
-              onChange={(e) => setTokenId(Math.max(1, parseInt(e.target.value) || 1))}
-              className="input-money"
-              style={{ width: '7rem' }}
-            />
-          </div>
-
-          {/* Info card */}
-          <InfoCard tokenId={tokenId} />
-
           {/* Tab bar */}
           <div className="flex border-b" style={{ borderColor: 'rgba(212,175,55,0.15)' }}>
             {(Object.keys(TAB_LABELS) as Tab[]).map((tab) => (
@@ -98,18 +98,27 @@ export default function App() {
           {activeTab === 'smf' && (
             <div className="space-y-4">
               <SMFInfoCard />
+              <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
               <SMFPanel tokenId={tokenId} />
             </div>
           )}
           {activeTab === 'nft' && (
             <div className="space-y-4">
+              <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
+              <InfoCard tokenId={tokenId} />
               <MintForm tokenId={tokenId} />
               <BurnForm tokenId={tokenId} />
             </div>
           )}
-          {activeTab === 'divest'   && <DivestForm tokenId={tokenId} />}
+          {activeTab === 'divest' && (
+            <div className="space-y-4">
+              <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
+              <DivestForm tokenId={tokenId} />
+            </div>
+          )}
           {activeTab === 'leverage' && (
             <div className="space-y-4">
+              <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
               <LeverageInfoCard tokenId={tokenId} />
               <MintLeverageForm tokenId={tokenId} />
               <DivestLeverageForm tokenId={tokenId} />
@@ -118,11 +127,17 @@ export default function App() {
           )}
           {activeTab === 'lp' && (
             <div className="space-y-4">
+              <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
               <LPInfoCard tokenId={tokenId} />
               <DivestLPForm tokenId={tokenId} />
             </div>
           )}
-          {activeTab === 'wrap' && <WrapUnwrapPanel tokenId={tokenId} />}
+          {activeTab === 'wrap' && (
+            <div className="space-y-4">
+              <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
+              <WrapUnwrapPanel tokenId={tokenId} />
+            </div>
+          )}
         </div>
       </main>
       <footer
