@@ -66,7 +66,7 @@ contract("Smartfolio", (accounts) => {
     const market       = await SmartfolioMarket.new();
     const creditMarket = await SmartfolioCreditMarket.new();
     sf = await deployProxy(Smartfolio, [owner, treasury.address, market.address, creditMarket.address], { kind: "uups" });
-    await sf.setTiers(TOKEN_ID, TIERS, { from: owner });
+    await sf.setTiers(TIERS, { from: owner });
   });
 
   // ---------------------------------------------------------------------------
@@ -98,14 +98,13 @@ contract("Smartfolio", (accounts) => {
 
   describe("setTiers", () => {
     it("stores tiers and emits TiersSet", async () => {
-      const tx = await sf.setTiers(TOKEN_ID, TIERS, { from: owner });
-      const tiers = await sf.getTiers(TOKEN_ID);
+      const tx = await sf.setTiers(TIERS, { from: owner });
+      const tiers = await sf.getTiers();
       assert.equal(tiers.length, 4);
       assert.equal(tiers[0].pricePerToken.toString(), toWei("0.001"));
 
       const log = tx.logs.find((l) => l.event === "TiersSet");
       assert.ok(log);
-      assert.equal(log.args.id.toString(), TOKEN_ID.toString());
     });
 
     it("reverts if tiers are not ordered ascending", async () => {
@@ -115,18 +114,18 @@ contract("Smartfolio", (accounts) => {
         { threshold: 0,    pricePerToken: toWei("1.0") },
       ];
       await expectRevert(
-        sf.setTiers(TOKEN_ID, bad, { from: owner }),
+        sf.setTiers(bad, { from: owner }),
         "tiers must be ordered ascending"
       );
     });
 
     it("reverts if a price is zero", async () => {
       const bad = [{ threshold: 100, pricePerToken: 0 }];
-      await expectRevert(sf.setTiers(TOKEN_ID, bad, { from: owner }), "price must be > 0");
+      await expectRevert(sf.setTiers(bad, { from: owner }), "price must be > 0");
     });
 
     it("reverts if called by non-owner", async () => {
-      await expectRevert(sf.setTiers(TOKEN_ID, TIERS, { from: alice }));
+      await expectRevert(sf.setTiers(TIERS, { from: alice }));
     });
   });
 
@@ -136,23 +135,24 @@ contract("Smartfolio", (accounts) => {
 
   describe("mintCost", () => {
     it("prices within tier 0 correctly", async () => {
-      const cost = await sf.mintCost(TOKEN_ID, 10);
+      const cost = await sf.mintCost(10);
       assert.equal(cost.toString(), toWei("0.01")); // 10 × 0.001
     });
 
     it("prices a mint that spans tier 0 → tier 1", async () => {
-      // mint 50 in tier 0 first
+      // mint 50 first — globalTotalSupply becomes 50
       await sf.mint(alice, TOKEN_ID, 50, "0x", { from: alice, value: toWei("0.05") });
 
-      // now mintCost for 100 more: 50 @ 0.001 + 50 @ 0.01
-      const cost = await sf.mintCost(TOKEN_ID, 100);
+      // globalTotalSupply = 50; next 100: 50 @ 0.001 (fills tier 0) + 50 @ 0.01
+      const cost = await sf.mintCost(100);
       const expected = new BN(toWei("0.001")).muln(50).add(new BN(toWei("0.01")).muln(50));
       assert.equal(cost.toString(), expected.toString());
     });
 
     it("prices a mint entirely within tier 1", async () => {
+      // globalTotalSupply = 100 after this mint — squarely in tier 1
       await sf.mint(alice, TOKEN_ID, 100, "0x", { from: alice, value: toWei("0.1") });
-      const cost = await sf.mintCost(TOKEN_ID, 10);
+      const cost = await sf.mintCost(10);
       assert.equal(cost.toString(), toWei("0.1")); // 10 × 0.01
     });
 
@@ -162,7 +162,7 @@ contract("Smartfolio", (accounts) => {
       // tier 1: 900 @ 0.01  = 9
       // tier 2: 9000 @ 0.1  = 900
       // tier 3: 1    @ 1.0  = 1
-      const cost = await sf.mintCost(TOKEN_ID, 10001);
+      const cost = await sf.mintCost(10001);
       const expected = new BN(toWei("0.001")).muln(100)
         .add(new BN(toWei("0.01")).muln(900))
         .add(new BN(toWei("0.1")).muln(9000))
@@ -171,11 +171,16 @@ contract("Smartfolio", (accounts) => {
     });
 
     it("reverts if tiers not configured", async () => {
-      await expectRevert(sf.mintCost(999, 1), "tiers not configured for id");
+      // deploy a fresh proxy with no tiers set
+      const t = await SmartfolioTreasury.new();
+      const m = await SmartfolioMarket.new();
+      const c = await SmartfolioCreditMarket.new();
+      const sfNoTiers = await deployProxy(Smartfolio, [owner, t.address, m.address, c.address], { kind: "uups" });
+      await expectRevert(sfNoTiers.mintCost(1), "tiers not configured for id");
     });
 
     it("reverts if amount is zero", async () => {
-      await expectRevert(sf.mintCost(TOKEN_ID, 0), "amount must be > 0");
+      await expectRevert(sf.mintCost(0), "amount must be > 0");
     });
   });
 
@@ -185,7 +190,7 @@ contract("Smartfolio", (accounts) => {
 
   describe("mint", () => {
     it("mints tokens, updates state and emits Minted", async () => {
-      const cost = await sf.mintCost(TOKEN_ID, 10);
+      const cost = await sf.mintCost(10);
       const tx = await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: cost });
 
       assert.equal((await sf.balanceOf(alice, TOKEN_ID)).toString(), "10");
@@ -200,7 +205,7 @@ contract("Smartfolio", (accounts) => {
     });
 
     it("refunds excess ETH", async () => {
-      const cost = await sf.mintCost(TOKEN_ID, 1);
+      const cost = await sf.mintCost(1);
       const overpay = new BN(cost).add(new BN(toWei("1")));
       const before = new BN(await web3.eth.getBalance(alice));
       const tx = await sf.mint(alice, TOKEN_ID, 1, "0x", { from: alice, value: overpay });
@@ -221,7 +226,7 @@ contract("Smartfolio", (accounts) => {
 
     it("reverts when paused", async () => {
       await sf.pause({ from: owner });
-      const cost = await sf.mintCost(TOKEN_ID, 1);
+      const cost = await sf.mintCost(1);
       await expectRevert(
         sf.mint(alice, TOKEN_ID, 1, "0x", { from: alice, value: cost }),
         "EnforcedPause"
@@ -231,7 +236,7 @@ contract("Smartfolio", (accounts) => {
     it("succeeds after unpause", async () => {
       await sf.pause({ from: owner });
       await sf.unpause({ from: owner });
-      const cost = await sf.mintCost(TOKEN_ID, 1);
+      const cost = await sf.mintCost(1);
       await sf.mint(alice, TOKEN_ID, 1, "0x", { from: alice, value: cost });
       assert.equal((await sf.balanceOf(alice, TOKEN_ID)).toString(), "1");
     });
@@ -248,12 +253,12 @@ contract("Smartfolio", (accounts) => {
     const ID_B = 2;
 
     beforeEach(async () => {
-      await sf.setTiers(ID_B, TIERS, { from: owner });
+      await sf.setTiers(TIERS, { from: owner });
     });
 
     it("mints multiple token IDs and updates reserves independently", async () => {
-      const costA = await sf.mintCost(ID_A, 5);
-      const costB = await sf.mintCost(ID_B, 3);
+      const costA = await sf.mintCost(5);
+      const costB = await sf.mintCost(3);
       const total = new BN(costA).add(new BN(costB));
 
       await sf.mintBatch(alice, [ID_A, ID_B], [5, 3], "0x", { from: alice, value: total });
@@ -265,7 +270,7 @@ contract("Smartfolio", (accounts) => {
     });
 
     it("reverts if ETH is insufficient for batch", async () => {
-      const costA = await sf.mintCost(ID_A, 5);
+      const costA = await sf.mintCost(5);
       await expectRevert(
         sf.mintBatch(alice, [ID_A, ID_B], [5, 3], "0x", { from: alice, value: costA }),
         "insufficient ETH"
@@ -281,13 +286,13 @@ contract("Smartfolio", (accounts) => {
 
   describe("burnFeeRate", () => {
     beforeEach(async () => {
-      const cost = await sf.mintCost(TOKEN_ID, 100);
+      const cost = await sf.mintCost(100);
       await sf.mint(alice, TOKEN_ID, 100, "0x", { from: alice, value: cost });
     });
 
     it("returns ~0 for a tiny burn proportion", async () => {
-      // burning 1 of 100 = 1% → rate = 0.01² × 0.5 = 0.00005 WAD
-      const rate = await sf.burnFeeRate(TOKEN_ID, 1);
+      // globalTotalSupply = 100; burning 1 = 1% → rate = 0.01² × 0.5 = 0.00005 WAD
+      const rate = await sf.burnFeeRate(1);
       const expected = WAD.div(new BN(100))         // 0.01 WAD (proportion)
         .mul(WAD.div(new BN(100)))                  // × 0.01
         .div(WAD)                                    // normalise
@@ -297,20 +302,20 @@ contract("Smartfolio", (accounts) => {
     });
 
     it("returns 50% for burning 100% of supply (default maxBurnFeeRate)", async () => {
-      const rate = await sf.burnFeeRate(TOKEN_ID, 100);
-      // proportion = 1.0, 1² × 0.5 = 0.5
+      const rate = await sf.burnFeeRate(100);
+      // globalTotalSupply = 100; proportion = 100/100 = 1.0, 1² × 0.5 = 0.5
       assert.equal(rate.toString(), toWei("0.5"));
     });
 
     it("scales quadratically — doubling proportion quadruples rate", async () => {
-      const rate10 = await sf.burnFeeRate(TOKEN_ID, 10); // 10% of 100
-      const rate20 = await sf.burnFeeRate(TOKEN_ID, 20); // 20% of 100
+      const rate10 = await sf.burnFeeRate(10); // 10% of globalTotalSupply (100)
+      const rate20 = await sf.burnFeeRate(20); // 20% of globalTotalSupply (100)
       // rate20 ≈ rate10 × 4
       assert.equal(rate20.toString(), rate10.muln(4).toString());
     });
 
-    it("reverts if amount exceeds supply", async () => {
-      await expectRevert(sf.burnFeeRate(TOKEN_ID, 101), "amount exceeds supply");
+    it("reverts if amount exceeds globalTotalSupply", async () => {
+      await expectRevert(sf.burnFeeRate(101), "amount exceeds supply");
     });
   });
 
@@ -322,7 +327,7 @@ contract("Smartfolio", (accounts) => {
     const MINT_AMOUNT = 100;
 
     beforeEach(async () => {
-      const cost = await sf.mintCost(TOKEN_ID, MINT_AMOUNT);
+      const cost = await sf.mintCost(MINT_AMOUNT);
       await sf.mint(alice, TOKEN_ID, MINT_AMOUNT, "0x", { from: alice, value: cost });
     });
 
@@ -359,7 +364,7 @@ contract("Smartfolio", (accounts) => {
     let mintCostPaid;
 
     beforeEach(async () => {
-      mintCostPaid = await sf.mintCost(TOKEN_ID, MINT_AMOUNT);
+      mintCostPaid = await sf.mintCost(MINT_AMOUNT);
       await sf.mint(alice, TOKEN_ID, MINT_AMOUNT, "0x", { from: alice, value: mintCostPaid });
     });
 
@@ -434,7 +439,7 @@ contract("Smartfolio", (accounts) => {
 
     beforeEach(async () => {
       await sf.setTreasury(treasury, { from: owner });
-      const cost = await sf.mintCost(TOKEN_ID, MINT_AMOUNT);
+      const cost = await sf.mintCost(MINT_AMOUNT);
       await sf.mint(alice, TOKEN_ID, MINT_AMOUNT, "0x", { from: alice, value: cost });
     });
 
@@ -508,17 +513,18 @@ contract("Smartfolio", (accounts) => {
   // ---------------------------------------------------------------------------
 
   describe("tokenInfo", () => {
-    it("returns zeroes for an unconfigured token with no supply", async () => {
-      // token 999 has no tiers — backingPerToken and price should be 0
+    it("returns zeroes for a token ID with no supply or reserve", async () => {
+      // token 999 has no mints — supply, reserve, and backingPerToken are 0.
+      // currentPrice reflects the global tier (tiers are shared) so it is non-zero.
       const info = await sf.tokenInfo(999);
       assert.equal(info.circulatingSupply.toString(), "0");
       assert.equal(info.reserve.toString(), "0");
       assert.equal(info.backingPerToken.toString(), "0");
-      assert.equal(info.currentPrice.toString(), "0");
+      assert.equal(info.currentPrice.toString(), toWei("0.001")); // global tier 0 price
     });
 
     it("reflects current tier after minting into tier 1", async () => {
-      const cost = await sf.mintCost(TOKEN_ID, 100);
+      const cost = await sf.mintCost(100);
       await sf.mint(alice, TOKEN_ID, 100, "0x", { from: alice, value: cost });
       const info = await sf.tokenInfo(TOKEN_ID);
       assert.equal(info.currentTierIndex.toString(), "1");
@@ -526,7 +532,7 @@ contract("Smartfolio", (accounts) => {
     });
 
     it("reports correct backing per token", async () => {
-      const cost = await sf.mintCost(TOKEN_ID, 10);
+      const cost = await sf.mintCost(10);
       await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: cost });
       const info = await sf.tokenInfo(TOKEN_ID);
       // backingPerToken = reserve × WAD / supply
@@ -543,15 +549,15 @@ contract("Smartfolio", (accounts) => {
 
   describe("simulateMint", () => {
     it("returns the same value as mintCost", async () => {
-      const direct = await sf.mintCost(TOKEN_ID, 50);
-      const sim    = await sf.simulateMint(TOKEN_ID, 50);
+      const direct = await sf.mintCost(50);
+      const sim    = await sf.simulateMint(50);
       assert.equal(sim.toString(), direct.toString());
     });
   });
 
   describe("simulateBurn", () => {
     beforeEach(async () => {
-      const cost = await sf.mintCost(TOKEN_ID, 100);
+      const cost = await sf.mintCost(100);
       await sf.mint(alice, TOKEN_ID, 100, "0x", { from: alice, value: cost });
     });
 
@@ -564,7 +570,7 @@ contract("Smartfolio", (accounts) => {
     });
 
     it("feeRate matches burnFeeRate", async () => {
-      const rate = await sf.burnFeeRate(TOKEN_ID, 30);
+      const rate = await sf.burnFeeRate(30);
       const sim  = await sf.simulateBurn(TOKEN_ID, 30);
       assert.equal(sim.feeRate.toString(), rate.toString());
     });
@@ -836,11 +842,11 @@ contract("Smartfolio", (accounts) => {
       await sf.setWETH(mockWETH.address, { from: owner });
 
       // Set tiers and portfolio config for TOKEN_ID
-      await sf.setTiers(TOKEN_ID, TIERS, { from: owner });
+      await sf.setTiers(TIERS, { from: owner });
       await sf.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address), { from: owner });
 
       // Alice mints 10 tokens (10 × 0.001 ETH = 0.01 ETH in reserve)
-      const cost = await sf.mintCost(TOKEN_ID, 10);
+      const cost = await sf.mintCost(10);
       await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: cost });
     });
 
@@ -888,8 +894,8 @@ contract("Smartfolio", (accounts) => {
 
       it("reverts if no portfolio config", async () => {
         const OTHER_ID = 42;
-        await sf.setTiers(OTHER_ID, TIERS, { from: owner });
-        const cost = await sf.mintCost(OTHER_ID, 1);
+        await sf.setTiers(TIERS, { from: owner });
+        const cost = await sf.mintCost(1);
         await sf.mint(alice, OTHER_ID, 1, "0x", { from: alice, value: cost });
         await expectRevert(sf.deploy(OTHER_ID, [], { from: keeper }), "no portfolio config");
       });
@@ -899,7 +905,7 @@ contract("Smartfolio", (accounts) => {
         await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
         // Try to deploy a fresh token ID that has a config but no reserve
         const OTHER_ID = 43;
-        await sf.setTiers(OTHER_ID, TIERS, { from: owner });
+        await sf.setTiers(TIERS, { from: owner });
         await sf.setPortfolioConfig(OTHER_ID, buildAssets(tokenA.address, tokenB.address), { from: owner });
         await expectRevert(sf.deploy(OTHER_ID, [0, 0], { from: keeper }), "no reserve to deploy");
       });
@@ -920,11 +926,11 @@ contract("Smartfolio", (accounts) => {
         const m2 = await SmartfolioMarket.new();
         const c2 = await SmartfolioCreditMarket.new();
         const sf2 = await deployProxy(Smartfolio, [owner, t2.address, m2.address, c2.address], { kind: "uups" });
-        await sf2.setTiers(TOKEN_ID, TIERS, { from: owner });
+        await sf2.setTiers(TIERS, { from: owner });
         await sf2.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address), { from: owner });
         await sf2.setKeeper(keeper, { from: owner });
         await sf2.setWETH(mockWETH.address, { from: owner });
-        const cost = await sf2.mintCost(TOKEN_ID, 1);
+        const cost = await sf2.mintCost(1);
         await sf2.mint(alice, TOKEN_ID, 1, "0x", { from: alice, value: cost });
         await expectRevert(sf2.deploy(TOKEN_ID, [0, 0], { from: keeper }), "router not set");
       });
@@ -991,7 +997,7 @@ contract("Smartfolio", (accounts) => {
 
       it("reverts if portfolio is not active", async () => {
         const OTHER_ID = 44;
-        await sf.setTiers(OTHER_ID, TIERS, { from: owner });
+        await sf.setTiers(TIERS, { from: owner });
         await sf.setPortfolioConfig(OTHER_ID, buildAssets(tokenA.address, tokenB.address), { from: owner });
         const instructions = [
           { token: tokenA.address, isSell: true, amountIn: 1, amountOutMin: 0, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
@@ -1046,11 +1052,11 @@ contract("Smartfolio", (accounts) => {
       await sf.setSwapRouter(mockRouter.address, { from: owner });
       await sf.setWETH(mockWETH.address, { from: owner });
 
-      await sf.setTiers(TOKEN_ID, TIERS, { from: owner });
+      await sf.setTiers(TIERS, { from: owner });
       await sf.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address), { from: owner });
 
       // Alice mints 100 tokens → 0.1 ETH in reserve
-      const cost = await sf.mintCost(TOKEN_ID, 100);
+      const cost = await sf.mintCost(100);
       await sf.mint(alice, TOKEN_ID, 100, "0x", { from: alice, value: cost });
 
       // Deploy portfolio
@@ -1139,7 +1145,7 @@ contract("Smartfolio", (accounts) => {
         );
 
         // Bob mints and redeploys
-        const cost = await sf.mintCost(TOKEN_ID, 10);
+        const cost = await sf.mintCost(10);
         await sf.mint(bob, TOKEN_ID, 10, "0x", { from: bob, value: cost });
         await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
 
@@ -1148,7 +1154,7 @@ contract("Smartfolio", (accounts) => {
 
       it("multiple holders divesting proportionally does not affect each other", async () => {
         // Bob also mints 100 tokens — now total supply is 200
-        const cost = await sf.mintCost(TOKEN_ID, 100);
+        const cost = await sf.mintCost(100);
         // Need to undeploy for Bob to add to reserve... actually portfolio is active
         // so Bob can still mint (mint adds to reserve, does not go to portfolio automatically)
         await sf.mint(bob, TOKEN_ID, 100, "0x", { from: bob, value: cost });
@@ -1197,13 +1203,13 @@ contract("Smartfolio", (accounts) => {
       it("reverts if portfolio is not active", async () => {
         // Deploy a fresh token ID that has never been deployed
         const OTHER_ID = 50;
-        await sf.setTiers(OTHER_ID, TIERS, { from: owner });
+        await sf.setTiers(TIERS, { from: owner });
         await sf.setPortfolioConfig(
           OTHER_ID,
           buildAssets(tokenA.address, tokenB.address),
           { from: owner }
         );
-        const cost = await sf.mintCost(OTHER_ID, 1);
+        const cost = await sf.mintCost(1);
         await sf.mint(alice, OTHER_ID, 1, "0x", { from: alice, value: cost });
         await expectRevert(
           sf.divest(OTHER_ID, 1, 0, { from: alice }),
@@ -1273,7 +1279,7 @@ contract("Smartfolio — leverage Phase 1", (accounts) => {
     mockStable   = await MockERC20.new("USD Coin", "USDC");
 
     await sf.setWETH(mockWETH.address, { from: owner });
-    await sf.setTiers(LEV_ID, TIERS, { from: owner });
+    await sf.setTiers(TIERS, { from: owner });
     await sf.setLeverageConfig(LEV_ID, makeLevCfg(mockAavePool.address, mockStable.address), { from: owner });
   });
 
@@ -1348,7 +1354,7 @@ contract("Smartfolio — leverage Phase 1", (accounts) => {
     });
 
     it("reverts if token already has circulating supply", async () => {
-      const cost = await sf.mintCost(LEV_ID, 1);
+      const cost = await sf.mintCost(1);
       await sf.mintLeverage(LEV_ID, 1, "0x", { from: alice, value: cost });
       await expectRevert(
         sf.setLeverageConfig(LEV_ID, makeLevCfg(mockAavePool.address, mockStable.address), { from: owner }),
@@ -1370,7 +1376,7 @@ contract("Smartfolio — leverage Phase 1", (accounts) => {
 
   describe("mintLeverage", () => {
     it("mints tokens, updates aaveCollateral, deposits WETH to Aave, emits LeverageMinted", async () => {
-      const cost = await sf.mintCost(LEV_ID, 10);
+      const cost = await sf.mintCost(10);
       const tx   = await sf.mintLeverage(LEV_ID, 10, "0x", { from: alice, value: cost });
 
       assert.equal((await sf.balanceOf(alice, LEV_ID)).toString(), "10");
@@ -1391,7 +1397,7 @@ contract("Smartfolio — leverage Phase 1", (accounts) => {
     });
 
     it("refunds excess ETH", async () => {
-      const cost  = await sf.mintCost(LEV_ID, 1);
+      const cost  = await sf.mintCost(1);
       const extra = new BN(toWei("0.5"));
       const before = new BN(await web3.eth.getBalance(alice));
       await sf.mintLeverage(LEV_ID, 1, "0x", { from: alice, value: cost.add(extra) });
@@ -1404,9 +1410,9 @@ contract("Smartfolio — leverage Phase 1", (accounts) => {
     });
 
     it("cumulative: second mint adds to aaveCollateral", async () => {
-      const cost1 = await sf.mintCost(LEV_ID, 10);
+      const cost1 = await sf.mintCost(10);
       await sf.mintLeverage(LEV_ID, 10, "0x", { from: alice, value: cost1 });
-      const cost2 = await sf.mintCost(LEV_ID, 5);
+      const cost2 = await sf.mintCost(5);
       await sf.mintLeverage(LEV_ID, 5, "0x", { from: bob, value: cost2 });
 
       const expected = cost1.add(cost2);
@@ -1428,7 +1434,7 @@ contract("Smartfolio — leverage Phase 1", (accounts) => {
     });
 
     it("reverts if ETH is insufficient", async () => {
-      const cost = await sf.mintCost(LEV_ID, 10);
+      const cost = await sf.mintCost(10);
       await expectRevert(
         sf.mintLeverage(LEV_ID, 10, "0x", { from: alice, value: cost.subn(1) }),
         "insufficient ETH"
@@ -1437,7 +1443,7 @@ contract("Smartfolio — leverage Phase 1", (accounts) => {
 
 
     it("reverts when paused", async () => {
-      const cost = await sf.mintCost(LEV_ID, 1);
+      const cost = await sf.mintCost(1);
       await sf.pause({ from: owner });
       await expectRevert(
         sf.mintLeverage(LEV_ID, 1, "0x", { from: alice, value: cost }),
@@ -1454,7 +1460,7 @@ contract("Smartfolio — leverage Phase 1", (accounts) => {
     let mintCost100;
 
     beforeEach(async () => {
-      mintCost100 = await sf.mintCost(LEV_ID, 100);
+      mintCost100 = await sf.mintCost(100);
       await sf.mintLeverage(LEV_ID, 100, "0x", { from: alice, value: mintCost100 });
     });
 
@@ -1499,7 +1505,7 @@ contract("Smartfolio — leverage Phase 1", (accounts) => {
     });
 
     it("two holders divest proportionally without affecting each other", async () => {
-      const costBob = await sf.mintCost(LEV_ID, 100);
+      const costBob = await sf.mintCost(100);
       await sf.mintLeverage(LEV_ID, 100, "0x", { from: bob, value: costBob });
 
       const totalColl = new BN(await sf.aaveCollateral(LEV_ID));
@@ -1574,7 +1580,7 @@ contract("Smartfolio — leverage Phase 1", (accounts) => {
     });
 
     it("returns updated collateral after mint", async () => {
-      const cost = await sf.mintCost(LEV_ID, 10);
+      const cost = await sf.mintCost(10);
       await sf.mintLeverage(LEV_ID, 10, "0x", { from: alice, value: cost });
       const info = await sf.getLeverageInfo(LEV_ID);
       assert.equal(info.collateralWeth.toString(), cost.toString());
@@ -1582,7 +1588,7 @@ contract("Smartfolio — leverage Phase 1", (accounts) => {
     });
 
     it("collateralWeth decreases after partial divest", async () => {
-      const cost = await sf.mintCost(LEV_ID, 100);
+      const cost = await sf.mintCost(100);
       await sf.mintLeverage(LEV_ID, 100, "0x", { from: alice, value: cost });
       await sf.divestLeverage(LEV_ID, 50, 0, { from: alice });
       const info = await sf.getLeverageInfo(LEV_ID);
@@ -1643,11 +1649,11 @@ contract("Smartfolio — leverage Phase 2", (accounts) => {
     await sf.setWETH(mockWETH.address,             { from: owner });
     await sf.setSwapRouter(mockRouter.address,      { from: owner });
     await sf.setKeeper(keeperAccount,               { from: owner });
-    await sf.setTiers(LEV_ID, LEV_TIERS,            { from: owner });
+    await sf.setTiers(LEV_TIERS,            { from: owner });
     await sf.setLeverageConfig(LEV_ID, makeLevCfg(mockAavePool.address, mockStable.address), { from: owner });
 
     // Alice mints 100 leverage tokens → 0.1 ETH → Aave as WETH collateral
-    mintCost100 = await sf.mintCost(LEV_ID, 100);
+    mintCost100 = await sf.mintCost(100);
     await sf.mintLeverage(LEV_ID, 100, "0x", { from: alice, value: mintCost100 });
 
     // Pre-fund MockAavePool with stable so it can lend via borrow()
@@ -1739,7 +1745,7 @@ contract("Smartfolio — leverage Phase 2", (accounts) => {
 
     it("reverts if no collateral (no leverage position)", async () => {
       // Use a different token ID with no minted tokens
-      await sf.setTiers(99, LEV_TIERS, { from: owner });
+      await sf.setTiers(LEV_TIERS, { from: owner });
       await sf.setLeverageConfig(99, makeLevCfg(mockAavePool.address, mockStable.address), { from: owner });
       await expectRevert(
         sf.leverUp(99, new BN(toWei("0.001")), 0, 3000, "0x", { from: keeperAccount }),
@@ -1937,11 +1943,11 @@ contract("Smartfolio — leverage Phase 3", (accounts) => {
     await sf.setWETH(mockWETH.address,        { from: owner });
     await sf.setSwapRouter(mockRouter.address, { from: owner });
     await sf.setKeeper(keeperAccount,          { from: owner });
-    await sf.setTiers(LEV_ID, LEV_TIERS,       { from: owner });
+    await sf.setTiers(LEV_TIERS,       { from: owner });
     await sf.setLeverageConfig(LEV_ID, makeLevCfg(mockAavePool.address, mockStable.address), { from: owner });
 
     // Alice mints 100 tokens → 0.1 ETH collateral in Aave
-    mintCost100 = await sf.mintCost(LEV_ID, 100);
+    mintCost100 = await sf.mintCost(100);
     await sf.mintLeverage(LEV_ID, 100, "0x", { from: alice, value: mintCost100 });
 
     // Fund pool with stable for borrow, router with WETH for leverUp and stable for leverDown
@@ -2026,7 +2032,7 @@ contract("Smartfolio — leverage Phase 3", (accounts) => {
 
   describe("getHealthFactor", () => {
     it("returns max uint256 when there is no collateral", async () => {
-      await sf.setTiers(99, LEV_TIERS, { from: owner });
+      await sf.setTiers(LEV_TIERS, { from: owner });
       await sf.setLeverageConfig(99, makeLevCfg(mockAavePool.address, mockStable.address), { from: owner });
       const hf = await sf.getHealthFactor(99);
       assert.equal(hf.toString(), new BN(2).pow(new BN(256)).subn(1).toString());
@@ -2080,7 +2086,7 @@ contract("Smartfolio — leverage Phase 3", (accounts) => {
 
     it("healthFactor is max uint256 before any leverUp", async () => {
       // Use a fresh token ID
-      await sf.setTiers(98, LEV_TIERS, { from: owner });
+      await sf.setTiers(LEV_TIERS, { from: owner });
       await sf.setLeverageConfig(98, makeLevCfg(mockAavePool.address, mockStable.address), { from: owner });
       const info = await sf.getLeverageInfo(98);
       assert.equal(info.healthFactor.toString(), new BN(2).pow(new BN(256)).subn(1).toString());

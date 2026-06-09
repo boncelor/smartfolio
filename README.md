@@ -116,17 +116,21 @@ LTV safety: `maxLtvBps` is capped at 1000 (10%). At 5% LTV against WETH (80% liq
 
 ## Bonding Curve
 
-Minting cost rises through configured step tiers. Each tier defines a threshold (total tokens minted so far) and a price per token. The last tier is open-ended.
+Minting cost rises through configured step tiers. Each tier defines a threshold and a price per token. The last tier is open-ended.
+
+Tier position is determined by `globalTotalSupply` — the live circulating supply across **all** token IDs. All instruments share a single price curve: minting any token ID advances the tier for every other, and burning any token ID can lower the tier back.
 
 Example 4-tier config:
 ```
-Tier 0:  0 – 99 tokens    →  0.001 ETH / token
-Tier 1:  100 – 999        →  0.01  ETH / token
-Tier 2:  1,000 – 9,999    →  0.1   ETH / token
-Tier 3:  10,000+           →  1.0   ETH / token
+Tier 0:  globalTotalSupply  0 – 99       →  0.001 ETH / token
+Tier 1:  globalTotalSupply  100 – 999    →  0.01  ETH / token
+Tier 2:  globalTotalSupply  1,000 – 9,999 →  0.1  ETH / token
+Tier 3:  globalTotalSupply  10,000+       →  1.0  ETH / token
 ```
 
 `mintCost(id, amount)` correctly handles mint orders that cross multiple tier boundaries in a single transaction.
+
+**Burn fee** is also based on `globalTotalSupply`: `feeRate = (amount / globalTotalSupply)² × maxBurnFeeRate`. The fee reflects the burn's impact on the whole protocol, not just a single token ID's supply.
 
 ---
 

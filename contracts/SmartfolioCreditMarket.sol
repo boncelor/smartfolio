@@ -29,7 +29,7 @@ contract SmartfolioCreditMarket is SmartfolioBase, ERC1155Upgradeable {
         if (!isLeverageToken[id]) revert NotLeverageToken();
         if (amount == 0) revert AmountZero();
 
-        uint256 cost = _mintCost(id, amount);
+        uint256 cost = _mintCost(amount);
         if (msg.value < cost) revert InsufficientETH();
 
         LeverageConfig storage cfg = leverageConfig[id];

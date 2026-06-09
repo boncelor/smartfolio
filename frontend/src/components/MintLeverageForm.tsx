@@ -18,8 +18,8 @@ export default function MintLeverageForm({ tokenId }: Props) {
     address: CONTRACT_ADDRESS,
     abi: SMARTFOLIO_ABI,
     functionName: 'mintCost',
-    args: [BigInt(tokenId), BigInt(parsedAmount)],
-    query: { enabled: isValidAmount && tokenId > 0 },
+    args: [BigInt(parsedAmount)],
+    query: { enabled: isValidAmount },
   })
 
   const { writeContract, data: txHash, isPending: isWritePending, error: writeError } = useWriteContract()

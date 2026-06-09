@@ -18,9 +18,9 @@ export default function MintForm({ tokenId }: Props) {
     address: CONTRACT_ADDRESS,
     abi: SMARTFOLIO_ABI,
     functionName: 'mintCost',
-    args: [BigInt(tokenId), BigInt(parsedAmount)],
+    args: [BigInt(parsedAmount)],
     query: {
-      enabled: isValidAmount && tokenId > 0,
+      enabled: isValidAmount,
     },
   })
 

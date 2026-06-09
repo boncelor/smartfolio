@@ -45,7 +45,7 @@ contract("SmartfolioToken + SmartfolioTokenFactory", (accounts) => {
       [owner, treasury.address, market.address, creditMarket.address],
       { kind: "uups" }
     );
-    await sf.setTiers(TOKEN_ID, TIERS, { from: owner });
+    await sf.setTiers(TIERS, { from: owner });
 
     // Mint some ERC1155 tokens to alice so she can wrap them.
     await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: toWei("0.01") });
@@ -181,7 +181,7 @@ contract("SmartfolioToken + SmartfolioTokenFactory", (accounts) => {
         [owner, t2.address, m2.address, c2.address],
         { kind: "uups" }
       );
-      await sf2.setTiers(TOKEN_ID, TIERS, { from: owner });
+      await sf2.setTiers(TIERS, { from: owner });
       await sf2.mint(alice, TOKEN_ID, 5, "0x", { from: alice, value: toWei("0.005") });
 
       await expectRevert(
@@ -191,7 +191,7 @@ contract("SmartfolioToken + SmartfolioTokenFactory", (accounts) => {
 
     it("reverts if the token ID does not match", async () => {
       const OTHER_ID = 2;
-      await sf.setTiers(OTHER_ID, TIERS, { from: owner });
+      await sf.setTiers(TIERS, { from: owner });
       await sf.mint(alice, OTHER_ID, 5, "0x", { from: alice, value: toWei("0.005") });
 
       await expectRevert(
@@ -254,7 +254,7 @@ contract("SmartfolioToken + SmartfolioTokenFactory", (accounts) => {
       const stable = await MockERC20.new("USDC", "USDC");
 
       await sf.setWETH(mweth.address, { from: owner });
-      await sf.setTiers(LEVER_ID, TIERS, { from: owner });
+      await sf.setTiers(TIERS, { from: owner });
       await sf.setLeverageConfig(LEVER_ID, {
         aavePool:     aave.address,
         stableToken:  stable.address,
@@ -263,7 +263,7 @@ contract("SmartfolioToken + SmartfolioTokenFactory", (accounts) => {
       }, { from: owner });
 
       // Mint leverage tokens to alice.
-      const cost = await sf.mintCost(LEVER_ID, 3);
+      const cost = await sf.mintCost(3);
       await sf.mintLeverage(LEVER_ID, 3, "0x", { from: alice, value: cost });
 
       // Deploy a wrapper for the leverage token ID.
@@ -302,7 +302,7 @@ contract("SmartfolioToken + SmartfolioTokenFactory", (accounts) => {
       await sf.setWETH(mweth.address,    { from: owner });
       await sf.setSwapRouter(router.address, { from: owner });
       await sf.setKeeper(owner,          { from: owner });
-      await sf.setTiers(PORT_ID, TIERS,  { from: owner });
+      await sf.setTiers(TIERS,  { from: owner });
       await sf.setPortfolioConfig(
         PORT_ID,
         [{ token: tokenA.address, weightBps: 10000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" }],
@@ -310,7 +310,7 @@ contract("SmartfolioToken + SmartfolioTokenFactory", (accounts) => {
       );
 
       // Mint tokens so there is a reserve, then deploy → portfolioActive[PORT_ID] = true.
-      const cost = await sf.mintCost(PORT_ID, 5);
+      const cost = await sf.mintCost(5);
       await sf.mint(alice, PORT_ID, 5, "0x", { from: alice, value: cost });
       await sf.deploy(PORT_ID, [0], { from: owner });
 
