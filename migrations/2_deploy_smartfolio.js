@@ -4,6 +4,7 @@ const SmartfolioTreasury          = artifacts.require("SmartfolioTreasury");
 const SmartfolioMarket            = artifacts.require("SmartfolioMarket");
 const SmartfolioCreditMarket      = artifacts.require("SmartfolioCreditMarket");
 const SmartfolioLiquidityMarket   = artifacts.require("SmartfolioLiquidityMarket");
+const SmartfolioTokenFactory      = artifacts.require("SmartfolioTokenFactory");
 
 module.exports = async function (deployer, network, accounts) {
   const initialOwner = accounts[0];
@@ -27,9 +28,13 @@ module.exports = async function (deployer, network, accounts) {
   // Wire up the liquidity market facet post-deploy
   await proxy.setLiquidityMarketFacet(liquidityMarket.address);
 
+  // Deploy the ERC20 wrapper factory
+  const tokenFactory = await deployer.deploy(SmartfolioTokenFactory, proxy.address, initialOwner);
+
   console.log("Smartfolio deployed (UUPS proxy)");
   console.log("  TreasuryFacet:          ", treasury.address);
   console.log("  MarketFacet:            ", market.address);
   console.log("  CreditMarketFacet:      ", creditMarket.address);
   console.log("  LiquidityMarketFacet:   ", liquidityMarket.address);
+  console.log("  TokenFactory:           ", tokenFactory.address);
 };
