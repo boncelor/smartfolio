@@ -10,7 +10,7 @@
 | SmartfolioCreditMarket | `0x9101e9C4f588b0148914997213ce15d531Ae5dfF` |
 | SmartfolioLiquidityMarket | `0x2a43ba05692d0fEECF7Eed99970db3ceaB96C6a7` |
 | SmartfolioTokenFactory | `0xcc2f5866857C691492A38463929e56c43635A14f` |
-| SmartfolioERC20 (SMF) | `0x1b29D25723045DF0E63905AD1996708Af3f33b93` |
+| SmartfolioERC20 (SMF) | `0x0364eb7d3805beB98F175f711bCB38439718b49D` |
 
 ### Upgrade — 2026-06-09
 

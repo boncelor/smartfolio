@@ -7,16 +7,17 @@ interface Props {
   tokenId: number
 }
 
-type Action = 'buy' | 'mint' | 'add'
+type Action = 'mint' | 'burn' | 'nftMint' | 'add'
 
 const ACTION_LABELS: Record<Action, string> = {
-  buy:  'Buy SMF',
-  mint: 'Mint NFT',
-  add:  'Add to NFT',
+  mint:    'Mint SMF',
+  burn:    'Burn SMF',
+  nftMint: 'Mint NFT',
+  add:     'Add to NFT',
 }
 
 export default function SMFPanel({ tokenId }: Props) {
-  const [action, setAction] = useState<Action>('buy')
+  const [action, setAction] = useState<Action>('mint')
   const [amount, setAmount] = useState('')
   const [slippagePct, setSlippagePct] = useState('1')
   const { address, isConnected } = useAccount()
@@ -24,13 +25,22 @@ export default function SMFPanel({ tokenId }: Props) {
   const parsedAmount = parseInt(amount) || 0
   const isValid = parsedAmount > 0
 
-  // --- Buy SMF: cost in ETH ---
+  // --- Mint SMF: cost in ETH ---
   const { data: buyCost } = useReadContract({
     address: SMF_ADDRESS,
     abi: SMF_ABI,
     functionName: 'smfMintCost',
     args: [BigInt(parsedAmount)],
-    query: { enabled: action === 'buy' && isValid },
+    query: { enabled: action === 'mint' && isValid },
+  })
+
+  // --- Burn SMF: ETH received ---
+  const { data: burnValue } = useReadContract({
+    address: SMF_ADDRESS,
+    abi: SMF_ABI,
+    functionName: 'smfBurnValue',
+    args: [BigInt(parsedAmount)],
+    query: { enabled: action === 'burn' && isValid },
   })
 
   // --- Mint NFT: SMF required + fee ---
@@ -39,7 +49,7 @@ export default function SMFPanel({ tokenId }: Props) {
     abi: SMF_ABI,
     functionName: 'smfForNFT',
     args: [BigInt(tokenId), BigInt(parsedAmount)],
-    query: { enabled: action === 'mint' && isValid },
+    query: { enabled: action === 'nftMint' && isValid },
   })
   const smfForMint = mintSimulation?.[0]
   const feeForMint = mintSimulation?.[1]
@@ -68,7 +78,7 @@ export default function SMFPanel({ tokenId }: Props) {
   function handleSubmit() {
     if (!address) return
 
-    if (action === 'buy' && buyCost !== undefined && isValid) {
+    if (action === 'mint' && buyCost !== undefined && isValid) {
       writeContract({
         address: SMF_ADDRESS,
         abi: SMF_ABI,
@@ -78,7 +88,17 @@ export default function SMFPanel({ tokenId }: Props) {
       })
     }
 
-    if (action === 'mint' && smfForMint !== undefined && isValid) {
+    if (action === 'burn' && burnValue !== undefined && isValid) {
+      const minEthOut = BigInt(Math.floor(Number(burnValue) * (1 - (parseFloat(slippagePct) || 1) / 100)))
+      writeContract({
+        address: SMF_ADDRESS,
+        abi: SMF_ABI,
+        functionName: 'sellSMF',
+        args: [BigInt(parsedAmount), minEthOut],
+      })
+    }
+
+    if (action === 'nftMint' && smfForMint !== undefined && isValid) {
       const maxBurn = BigInt(Math.ceil(Number(smfForMint) * slippageFactor()))
       writeContract({
         address: SMF_ADDRESS,
@@ -100,18 +120,20 @@ export default function SMFPanel({ tokenId }: Props) {
   }
 
   const isDisabled = !isConnected || isPending || isConfirming || (
-    action === 'buy'  ? (buyCost === undefined || !isValid) :
-    action === 'mint' ? (smfForMint === undefined || !isValid) :
+    action === 'mint'    ? (buyCost === undefined || !isValid) :
+    action === 'burn'    ? (burnValue === undefined || !isValid) :
+    action === 'nftMint' ? (smfForMint === undefined || !isValid) :
     (smfForAdd === undefined || parsedEth === 0n)
   )
 
-  const amountLabel = action === 'add' ? 'ETH to add' : action === 'buy' ? 'SMF amount' : 'NFT amount'
-  const amountUnit  = action === 'add' ? 'ETH' : action === 'buy' ? 'SMF' : 'tokens'
+  const amountLabel = action === 'add' ? 'ETH to add' : action === 'nftMint' ? 'NFT amount' : 'SMF amount'
+  const amountUnit  = action === 'add' ? 'ETH' : action === 'nftMint' ? 'tokens' : 'SMF'
+  const needsSlippage = action !== 'mint'
 
   return (
     <div className="card space-y-4">
       {/* Action sub-tabs */}
-      <div className="flex gap-1">
+      <div className="flex gap-1 flex-wrap">
         {(Object.keys(ACTION_LABELS) as Action[]).map((a) => (
           <button
             key={a}
@@ -144,8 +166,8 @@ export default function SMFPanel({ tokenId }: Props) {
         </div>
       </div>
 
-      {/* Slippage (mint/add only) */}
-      {action !== 'buy' && (
+      {/* Slippage */}
+      {needsSlippage && (
         <div className="space-y-1">
           <label className="stat-label">Slippage tolerance</label>
           <div className="relative flex items-center" style={{ maxWidth: '8rem' }}>
@@ -164,13 +186,19 @@ export default function SMFPanel({ tokenId }: Props) {
 
       {/* Simulation info */}
       <div className="space-y-2">
-        {action === 'buy' && buyCost !== undefined && isValid && (
+        {action === 'mint' && buyCost !== undefined && isValid && (
           <div className="flex items-center justify-between box-info">
             <span className="stat-label" style={{ marginBottom: 0 }}>Cost</span>
             <span className="font-semibold text-gold">{formatEther(buyCost)} ETH</span>
           </div>
         )}
-        {action === 'mint' && smfForMint !== undefined && isValid && (
+        {action === 'burn' && burnValue !== undefined && isValid && (
+          <div className="flex items-center justify-between box-info">
+            <span className="stat-label" style={{ marginBottom: 0 }}>You receive</span>
+            <span className="font-semibold text-gold">{formatEther(burnValue)} ETH</span>
+          </div>
+        )}
+        {action === 'nftMint' && smfForMint !== undefined && isValid && (
           <>
             <div className="flex items-center justify-between box-info">
               <span className="stat-label" style={{ marginBottom: 0 }}>SMF to burn</span>

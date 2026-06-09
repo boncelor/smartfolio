@@ -15,14 +15,13 @@ import DivestLPForm from './components/DivestLPForm'
 import SMFInfoCard from './components/SMFInfoCard'
 import SMFPanel from './components/SMFPanel'
 
-type Tab = 'smf' | 'mint' | 'burn' | 'divest' | 'leverage' | 'lp' | 'wrap'
+type Tab = 'smf' | 'nft' | 'divest' | 'leverage' | 'lp' | 'wrap'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 const TAB_LABELS: Record<Tab, string> = {
   smf:      'SMF',
-  mint:     'Mint',
-  burn:     'Burn',
+  nft:      'NFT',
   divest:   'Divest',
   leverage: 'Leverage',
   lp:       'LP',
@@ -102,8 +101,12 @@ export default function App() {
               <SMFPanel tokenId={tokenId} />
             </div>
           )}
-          {activeTab === 'mint'     && <MintForm tokenId={tokenId} />}
-          {activeTab === 'burn'     && <BurnForm tokenId={tokenId} />}
+          {activeTab === 'nft' && (
+            <div className="space-y-4">
+              <MintForm tokenId={tokenId} />
+              <BurnForm tokenId={tokenId} />
+            </div>
+          )}
           {activeTab === 'divest'   && <DivestForm tokenId={tokenId} />}
           {activeTab === 'leverage' && (
             <div className="space-y-4">

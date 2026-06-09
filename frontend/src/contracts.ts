@@ -118,6 +118,23 @@ export const SMF_ABI = [
     ],
     outputs: [],
   },
+  {
+    name: 'smfBurnValue',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: [{ name: 'ethOut', type: 'uint256' }],
+  },
+  {
+    name: 'sellSMF',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'amount', type: 'uint256' },
+      { name: 'minEthOut', type: 'uint256' },
+    ],
+    outputs: [],
+  },
 ] as const
 
 export const SMARTFOLIO_ABI = [

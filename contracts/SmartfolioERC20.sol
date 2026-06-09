@@ -51,6 +51,7 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     event TreasurySet(address treasury);
     event SmartfolioSet(address smartfolio);
     event SMFMinted(address indexed account, uint256 amount, uint256 ethPaid);
+    event SMFBurned(address indexed account, uint256 amount, uint256 ethOut);
     event NFTMinted(address indexed account, uint256 indexed id, uint256 nftAmount, uint256 smfBurned, uint256 conversionFee);
     event ReserveAdded(address indexed account, uint256 indexed id, uint256 ethAmount, uint256 smfBurned);
 
@@ -156,6 +157,32 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     }
 
     // -------------------------------------------------------------------------
+    // User — sell SMF back for ETH
+    // -------------------------------------------------------------------------
+
+    /**
+     * @notice Sell `amount` SMF tokens and receive ETH back. Bonding curve pricing.
+     * @param amount     Number of SMF tokens to sell.
+     * @param minEthOut  Slippage guard — reverts if ETH received is less than this.
+     */
+    function sellSMF(uint256 amount, uint256 minEthOut) external nonReentrant {
+        if (amount == 0) revert AmountZero();
+        if (balanceOf(msg.sender) < amount) revert InsufficientSMFBalance();
+
+        uint256 ethOut = _ethForSmfAmount(amount);
+        if (ethOut < minEthOut) revert SlippageExceeded();
+        if (address(this).balance < ethOut) revert InsufficientETH();
+
+        smfTotalSupply -= amount;
+        _burn(msg.sender, amount);
+
+        emit SMFBurned(msg.sender, amount, ethOut);
+
+        (bool ok, ) = msg.sender.call{value: ethOut}("");
+        if (!ok) revert ETHTransferFailed();
+    }
+
+    // -------------------------------------------------------------------------
     // User — burn SMF to mint NFT
     // -------------------------------------------------------------------------
 
@@ -228,6 +255,13 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice Simulate the ETH received from selling `amount` SMF tokens.
+     */
+    function smfBurnValue(uint256 amount) public view returns (uint256 ethOut) {
+        return _ethForSmfAmount(amount);
+    }
+
+    /**
      * @notice Simulate the SMF cost to mint `nftAmount` ERC1155 tokens of `id`.
      * @return smfRequired  Total SMF to burn (covers NFT cost + fee).
      * @return feePaid      ETH value of the conversion fee.
@@ -283,6 +317,34 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
                 remaining = 0;
             }
         }
+    }
+
+    /**
+     * @dev Forward sell curve: how much ETH is released by burning `amount` SMF.
+     *      Walks tiers downward from current smfTotalSupply.
+     */
+    function _ethForSmfAmount(uint256 amount) internal view returns (uint256 ethOut) {
+        TierConfig[] storage tiers = _tiers;
+        if (tiers.length == 0) revert TiersNotConfigured();
+        if (amount == 0) revert AmountZero();
+
+        uint256 supply = smfTotalSupply;
+        uint256 remaining = amount;
+        uint256 n = tiers.length;
+
+        uint256 i = n;
+        do {
+            i--;
+            uint256 price = tiers[i].pricePerToken;
+            uint256 lowerBound = (i == 0) ? 0 : tiers[i - 1].threshold;
+            uint256 supplyInTier = supply > lowerBound ? supply - lowerBound : 0;
+            if (supplyInTier == 0) continue;
+
+            uint256 burnFromTier = remaining < supplyInTier ? remaining : supplyInTier;
+            ethOut += burnFromTier * price;
+            supply -= burnFromTier;
+            remaining -= burnFromTier;
+        } while (i > 0 && remaining > 0);
     }
 
     /**
