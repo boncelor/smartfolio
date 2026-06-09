@@ -6,6 +6,8 @@
 
 Smartfolio is an on-chain portfolio protocol built on Ethereum. It issues ERC1155 tokens where each token ID represents a distinct financial instrument. Four instrument types are supported: Standard bonding-curve tokens, Portfolio tokens whose reserves are deployed into a mixed basket of ERC20 assets (Uniswap V3 swaps), Aave V3 collateral deposits, and/or Uniswap V3 LP positions in any combination, LP tokens whose reserves are provided as concentrated liquidity into a single Uniswap V3 pool, and Leverage tokens whose reserves are held as WETH collateral on Aave V3. All instruments are optionally wrappable into standard ERC20 tokens to unlock DeFi composability.
 
+The protocol's primary entry point is **SMF** (`SmartfolioERC20`) — a global ERC20 token with its own bonding curve. Users buy SMF with ETH, then burn SMF to mint ERC1155 NFTs or to top up existing NFT reserves. The ETH backing of burned SMF flows directly into the NFT's reserve.
+
 The protocol is deployed as a single UUPS upgradeable proxy backed by a delegatecall facet architecture, keeping each contract under the EVM's 24 KB bytecode limit while sharing a single storage and ETH context.
 
 ---
@@ -388,7 +390,82 @@ An optional Chainlink ETH/USD feed can be registered per leverage token. When co
 
 ---
 
-## 8. Security Properties
+## 8. SMF — Global ERC20 Token
+
+### 8.1 Concept
+
+SMF (`SmartfolioERC20`) is a standalone ERC20 contract that acts as the primary liquidity layer for the protocol. Rather than paying ETH directly to mint ERC1155 NFTs, users first buy SMF with ETH via its own bonding curve. SMF can then be burned to:
+
+1. **Mint a new ERC1155 NFT** — the ETH backing of burned SMF flows into `reserve[id]`, funding the NFT.
+2. **Top up an existing NFT's reserve** — burn SMF to increase the backing per token for all holders of an ID without minting new tokens.
+
+The NFT itself is redeemed as usual via `burn()`, returning ETH to the holder.
+
+```
+User ──ETH──▶ buySMF()      ──SMF──▶ User
+User ──SMF──▶ mintNFT()     ──ETH──▶ Smartfolio.mintFunded()  ──ERC1155──▶ User
+User ──SMF──▶ addToNFT()    ──ETH──▶ Smartfolio.addReserve()  (no ERC1155 minted)
+User ──ERC1155──▶ burn()     ──ETH──▶ User
+```
+
+### 8.2 SMF Bonding Curve
+
+SMF has its own independent step-tier bonding curve, configured separately from the ERC1155 curve via `setTiers()`. The curve is driven by `smfTotalSupply` — the current SMF in circulation — and is structurally identical to the ERC1155 curve:
+
+```
+Tier 0:  smfTotalSupply  0 –      99   →  price₀ per SMF
+Tier 1:  smfTotalSupply  100 –   999   →  price₁ per SMF
+...
+```
+
+When SMF is burned the inverse curve is traversed: starting from the highest occupied tier, tokens are redeemed at their original tier price until the required ETH is covered. This ensures the ETH released by a burn exactly equals the ETH that was paid in for those tokens.
+
+### 8.3 Minting NFTs with SMF
+
+A user calls `mintNFT(id, nftAmount, maxSmfBurn)`:
+
+1. `ethNeeded = Smartfolio.mintCost(nftAmount)` — uses the ERC1155 tier pricing.
+2. `conversionFee = ethNeeded × conversionFeeBps / 10,000` — flat fee (default 1%, max 5%).
+3. `smfToBurn = _smfAmountForEth(ethNeeded + conversionFee)` — inverse curve traversal.
+4. Reverts if `smfToBurn > maxSmfBurn` (slippage guard).
+5. Burns `smfToBurn` SMF from the caller; decrement `smfTotalSupply`.
+6. Sends `conversionFee` to treasury (if set).
+7. Calls `Smartfolio.mintFunded{value: ethNeeded}(caller, id, nftAmount)` — mints ERC1155 and adds `ethNeeded` to `reserve[id]`.
+
+The conversion fee is the only cost beyond the NFT's backing value. It is taken from the ETH released by the burn before forwarding to Smartfolio.
+
+### 8.4 Topping Up a Reserve
+
+A user calls `addToNFT(id, ethAmount, maxSmfBurn)`:
+
+1. `smfToBurn = _smfAmountForEth(ethAmount)` — inverse curve traversal.
+2. Reverts if `smfToBurn > maxSmfBurn`.
+3. Burns SMF, calls `Smartfolio.addReserve{value: ethAmount}(id)`.
+4. `reserve[id]` increases by `ethAmount`; existing holders' backing per token increases immediately.
+
+No conversion fee applies to reserve top-ups.
+
+### 8.5 Restricted Smartfolio Entry Points
+
+Two new entry points on the Smartfolio proxy are callable only by the registered SMF contract (`smfContract`):
+
+- `mintFunded(address to, uint256 id, uint256 amount) payable` — mints ERC1155 without bonding curve price check; ETH comes directly from the SMF contract.
+- `addReserve(uint256 id) payable` — adds `msg.value` to `reserve[id]` without minting tokens.
+
+Both revert with `CallerNotSMFContract` if called by any other address. The SMF contract is registered via `setSMFContract(address)` (owner-only).
+
+### 8.6 Simulation Views
+
+| Function | Returns |
+|---|---|
+| `smfMintCost(amount)` | ETH cost to buy `amount` SMF |
+| `smfForNFT(id, nftAmount)` | `(smfRequired, feePaid)` — simulate `mintNFT` cost |
+| `smfForReserve(ethAmount)` | `smfRequired` — simulate `addToNFT` cost |
+| `getTiers()` | Current SMF tier configuration |
+
+---
+
+## 9. Security Properties
 
 | Property | Mechanism |
 |---|---|
@@ -402,10 +479,12 @@ An optional Chainlink ETH/USD feed can be registered per leverage token. When co
 | Wrap safety | ERC20 wrapper rejects leverage, portfolio-active, and LP-active tokens at deposit |
 | Mutual exclusion | Each token ID is strictly one type. All three config setters (`setPortfolioConfig`, `setLPConfig`, `setLeverageConfig`) and both deploy calls (`deploy`, `deployLP`) reject cross-type combinations at the earliest possible point |
 | Shared Aave account | All AAVE slices and leverage tokens share one proxy-level Aave account. A leveraged position's debt contributes to the aggregate health factor. Portfolio AAVE slices alone hold no debt and cannot be liquidated; the risk materialises only when leverage tokens with outstanding debt coexist on the same proxy |
+| SMF entry point | `mintFunded` and `addReserve` on Smartfolio are restricted to the registered SMF contract via `CallerNotSMFContract`. No external party can inject ETH into a reserve or mint tokens at arbitrary prices |
+| SMF conversion fee | Capped at 5% (`MAX_CONVERSION_FEE_BPS = 500`). Default 1%. Owner-adjustable within cap |
 
 ---
 
-## 9. Token Type Mutual Exclusion
+## 10. Token Type Mutual Exclusion
 
 Each token ID is permanently bound to exactly one instrument type. The constraint is enforced at the config setter level and again at the deploy call, so misconfiguration is rejected before any ETH is committed.
 
@@ -424,7 +503,7 @@ The only state transition that removes a type binding is a full exit: `divestLP`
 
 ---
 
-## 10. Token Type Summary
+## 11. Token Type Summary
 
 | Type | Reserve | Pricing | Exit | Fee |
 |---|---|---|---|---|
@@ -433,3 +512,4 @@ The only state transition that removes a type binding is a full exit: `divestLP`
 | **LP** | Uniswap V3 LP position NFT | Step-tier bonding curve | `divestLP()` | None |
 | **Leverage** | WETH collateral via Aave V3 | Step-tier bonding curve | `divestLeverage()` | None |
 | **ERC20 Wrapper** | Backed 1:1 by Standard ERC1155 | Market price | `unwrap()` then `burn()` | None (burn fee on underlying) |
+| **SMF** | ETH pool (independent bonding curve) | Step-tier bonding curve | N/A (burn SMF to get ETH indirectly via NFT) | 1% conversion fee on `mintNFT` (max 5%) |
