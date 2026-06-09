@@ -29,6 +29,17 @@ function resolveFactoryAddress(): `0x${string}` {
 
 export const FACTORY_ADDRESS: `0x${string}` = resolveFactoryAddress()
 
+// SMF address — set VITE_SMF_ADDRESS after deploying SmartfolioERC20
+function resolveSMFAddress(): `0x${string}` {
+  const envAddr = import.meta.env.VITE_SMF_ADDRESS as string | undefined
+  if (envAddr && envAddr.startsWith('0x') && envAddr.length === 42) {
+    return envAddr as `0x${string}`
+  }
+  return '0x0000000000000000000000000000000000000000'
+}
+
+export const SMF_ADDRESS: `0x${string}` = resolveSMFAddress()
+
 export const SMARTFOLIO_ABI = [
   // View functions
   {
