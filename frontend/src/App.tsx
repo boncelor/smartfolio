@@ -10,8 +10,10 @@ import MintLeverageForm from './components/MintLeverageForm'
 import DivestLeverageForm from './components/DivestLeverageForm'
 import KeeperPanel from './components/KeeperPanel'
 import WrapUnwrapPanel from './components/WrapUnwrapPanel'
+import LPInfoCard from './components/LPInfoCard'
+import DivestLPForm from './components/DivestLPForm'
 
-type Tab = 'mint' | 'burn' | 'divest' | 'leverage' | 'wrap'
+type Tab = 'mint' | 'burn' | 'divest' | 'leverage' | 'lp' | 'wrap'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
@@ -20,6 +22,7 @@ const TAB_LABELS: Record<Tab, string> = {
   burn:     'Burn',
   divest:   'Divest',
   leverage: 'Leverage',
+  lp:       'LP',
   wrap:     'Wrap / Unwrap',
 }
 
@@ -30,7 +33,7 @@ export default function App() {
   const isZeroAddress = CONTRACT_ADDRESS === ZERO_ADDRESS
 
   return (
-    <div className="min-h-screen text-white">
+    <div className="min-h-screen text-white flex flex-col">
       <Header />
 
       {isZeroAddress && (
@@ -50,7 +53,7 @@ export default function App() {
         </div>
       )}
 
-      <main className="flex justify-center px-4 py-8">
+      <main className="flex-1 flex justify-center px-4 py-8">
         <div className="w-full max-w-2xl space-y-6">
 
           {/* Token ID input */}
@@ -80,7 +83,7 @@ export default function App() {
                 onClick={() => setActiveTab(tab)}
                 className={`px-6 py-3 text-sm font-semibold transition-colors ${
                   activeTab === tab
-                    ? tab === 'leverage' ? 'tab-active-gold' : 'tab-active-green'
+                    ? (tab === 'leverage' || tab === 'lp') ? 'tab-active-gold' : 'tab-active-green'
                     : 'tab-inactive'
                 }`}
               >
@@ -101,9 +104,28 @@ export default function App() {
               <KeeperPanel tokenId={tokenId} />
             </div>
           )}
+          {activeTab === 'lp' && (
+            <div className="space-y-4">
+              <LPInfoCard tokenId={tokenId} />
+              <DivestLPForm tokenId={tokenId} />
+            </div>
+          )}
           {activeTab === 'wrap' && <WrapUnwrapPanel tokenId={tokenId} />}
         </div>
       </main>
+      <footer
+        className="px-4 py-5 text-center text-xs leading-relaxed"
+        style={{
+          borderTop: '1px solid rgba(212,175,55,0.12)',
+          color: 'rgba(255,255,255,0.35)',
+        }}
+      >
+        <p>
+          <span style={{ color: '#fb923c', fontWeight: 600 }}>Experimental software — use at your own risk.</span>
+          {' '}This protocol is unaudited. Interactions with smart contracts may result in partial or total loss of funds.
+          By using this interface you acknowledge that you understand the risks and accept sole responsibility for your actions.
+        </p>
+      </footer>
     </div>
   )
 }
