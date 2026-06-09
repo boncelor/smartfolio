@@ -251,6 +251,7 @@ contract Smartfolio is
         if (config.tickLower >= config.tickUpper) revert NoLPConfig();
         if (lpActive[id]) revert LiquidityAlreadyActive();
         if (portfolioActive[id]) revert PortfolioActive();
+        if (isLeverageToken[id]) revert IncompatibleTokenType();
         lpConfig[id] = config;
         emit LPConfigSet(id, config.tokenB, config.poolFee, config.tickLower, config.tickUpper);
     }
@@ -259,6 +260,7 @@ contract Smartfolio is
         if (assets.length == 0) revert NoAssetsProvided();
         if (portfolioActive[id]) revert PortfolioActive();
         if (lpActive[id]) revert LiquidityAlreadyActive();
+        if (isLeverageToken[id]) revert IncompatibleTokenType();
         uint256 totalWeight;
         for (uint256 i = 0; i < assets.length; i++) {
             if (assets[i].token == address(0)) revert ZeroAddress();
@@ -283,6 +285,8 @@ contract Smartfolio is
         if (config.targetLtvBps > config.maxLtvBps) revert TargetLtvExceedsMax();
         if (config.maxLtvBps > 1000) revert MaxLtvExceeds10Pct();
         if (totalSupply[id] != 0) revert TokenHasSupply();
+        if (portfolioActive[id]) revert PortfolioActive();
+        if (lpActive[id]) revert LiquidityAlreadyActive();
         leverageConfig[id] = config;
         isLeverageToken[id] = true;
         emit LeverageConfigSet(id, config.aavePool, config.stableToken, config.targetLtvBps, config.maxLtvBps);

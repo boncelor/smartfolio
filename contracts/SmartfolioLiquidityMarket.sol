@@ -95,6 +95,7 @@ contract SmartfolioLiquidityMarket is SmartfolioBase, ERC1155Upgradeable {
         if (cfg.tokenB == address(0))  revert NoLPConfig();
         if (lpActive[id])              revert LiquidityAlreadyActive();
         if (portfolioActive[id])       revert PortfolioActive();
+        if (isLeverageToken[id])       revert IncompatibleTokenType();
         if (reserve[id] == 0)          revert NoReserveToDeploy();
 
         uint256 ethAmount = reserve[id];

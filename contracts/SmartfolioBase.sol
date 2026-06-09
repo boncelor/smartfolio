@@ -93,6 +93,7 @@ abstract contract SmartfolioBase {
     error NoLPConfig();
     error LiquidityAlreadyActive();
     error LiquidityNotActive();
+    error IncompatibleTokenType();
 
     // -------------------------------------------------------------------------
     // Events
