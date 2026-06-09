@@ -357,11 +357,30 @@ An optional Chainlink ETH/USD feed can be registered per leverage token. When co
 | Slippage | `minEthOut` / `amountsOutMinimum` on all Uniswap interactions |
 | LTV cap | Hard-coded 10% ceiling on leverage regardless of keeper instruction |
 | Wrap safety | ERC20 wrapper rejects leverage, portfolio-active, and LP-active tokens at deposit |
-| Mutual exclusion | A token ID cannot simultaneously have a portfolio config and an LP config active |
+| Mutual exclusion | Each token ID is strictly one type. All three config setters (`setPortfolioConfig`, `setLPConfig`, `setLeverageConfig`) and both deploy calls (`deploy`, `deployLP`) reject cross-type combinations at the earliest possible point |
 
 ---
 
-## 9. Token Type Summary
+## 9. Token Type Mutual Exclusion
+
+Each token ID is permanently bound to exactly one instrument type. The constraint is enforced at the config setter level and again at the deploy call, so misconfiguration is rejected before any ETH is committed.
+
+| Attempted combination | Blocked by |
+|---|---|
+| `setPortfolioConfig` on a leverage token | `isLeverageToken[id]` → `IncompatibleTokenType` |
+| `setPortfolioConfig` while LP active | `lpActive[id]` → `LiquidityAlreadyActive` |
+| `setLPConfig` on a leverage token | `isLeverageToken[id]` → `IncompatibleTokenType` |
+| `setLPConfig` while portfolio active | `portfolioActive[id]` → `PortfolioActive` |
+| `setLeverageConfig` while portfolio active | `portfolioActive[id]` → `PortfolioActive` |
+| `setLeverageConfig` while LP active | `lpActive[id]` → `LiquidityAlreadyActive` |
+| `deploy` (portfolio) while LP active | `lpActive[id]` → `LiquidityAlreadyActive` |
+| `deployLP` on a leverage token | `isLeverageToken[id]` → `IncompatibleTokenType` |
+
+The only state transition that removes a type binding is a full exit: `divestLP` or `divest` with the last token burns resets `lpActive[id]` / `portfolioActive[id]`. `isLeverageToken[id]` is permanent and cannot be cleared once set.
+
+---
+
+## 10. Token Type Summary
 
 | Type | Reserve | Pricing | Exit | Fee |
 |---|---|---|---|---|
