@@ -4,7 +4,7 @@
 
 ## Abstract
 
-Smartfolio is an on-chain portfolio protocol built on Ethereum. It issues ERC1155 tokens where each token ID represents a distinct financial instrument. Four instrument types are supported: Standard bonding-curve tokens, Portfolio tokens whose reserves are deployed into ERC20 baskets via Uniswap V3, LP tokens whose reserves are provided as concentrated liquidity into a Uniswap V3 pool, and Leverage tokens whose reserves are held as WETH collateral on Aave V3. All instruments are optionally wrappable into standard ERC20 tokens to unlock DeFi composability.
+Smartfolio is an on-chain portfolio protocol built on Ethereum. It issues ERC1155 tokens where each token ID represents a distinct financial instrument. Four instrument types are supported: Standard bonding-curve tokens, Portfolio tokens whose reserves are deployed into a mixed basket of ERC20 assets (Uniswap V3 swaps), Aave V3 collateral deposits, and/or Uniswap V3 LP positions in any combination, LP tokens whose reserves are provided as concentrated liquidity into a single Uniswap V3 pool, and Leverage tokens whose reserves are held as WETH collateral on Aave V3. All instruments are optionally wrappable into standard ERC20 tokens to unlock DeFi composability.
 
 The protocol is deployed as a single UUPS upgradeable proxy backed by a delegatecall facet architecture, keeping each contract under the EVM's 24 KB bytecode limit while sharing a single storage and ETH context.
 
@@ -177,44 +177,87 @@ Unwrapping at any time returns the underlying ERC1155, which retains its full bu
 
 ### 5.1 Concept
 
-A Portfolio token is a Standard token whose ETH reserve is deployed into a basket of ERC20 assets via Uniswap V3. The basket weights are configured by the owner. A keeper manages rebalancing.
+A Portfolio token is a Standard token whose ETH reserve is deployed into a mixed basket of sub-strategies. Each asset slice specifies an `AssetType` that determines how its ETH allocation is deployed:
+
+| `AssetType` | Strategy | Underlying |
+|---|---|---|
+| `ERC20` | Uniswap V3 token swap | ERC20 held by proxy |
+| `AAVE` | Aave V3 collateral deposit | aWETH held by Aave (shared proxy account) |
+| `LP` | Uniswap V3 LP position | Position NFT held by proxy |
+
+A single portfolio can combine all three types in one basket.
 
 ### 5.2 Configuration
 
-The owner defines a basket with per-asset weights (in basis points, summing to 10,000), Uniswap pool fees, and optional multi-hop swap paths:
+The owner defines a basket with per-asset weights (in basis points, summing to 10,000) and type-specific parameters:
 
 ```
 setPortfolioConfig(id, [
-  { token: WBTC, weightBps: 6000, poolFee: 3000, ... },
-  { token: LINK, weightBps: 4000, poolFee: 500,  ... },
+  { assetType: ERC20, token: WBTC,  weightBps: 5000, poolFee: 3000, ... },
+  { assetType: AAVE,  token: 0,     weightBps: 2000, ... },
+  { assetType: LP,    token: USDC,  weightBps: 3000, poolFee: 500,
+    swapFee: 500, tickLower: -887220, tickUpper: 887220, ... },
 ])
 ```
+
+- **ERC20 slices** require `token` (target ERC20) and `poolFee` (Uniswap pool fee tier). Optional `swapPath`/`sellSwapPath` override single-hop with multi-hop routes.
+- **AAVE slices** carry no additional parameters — WETH is deposited directly into Aave.
+- **LP slices** require `token` (paired token), `poolFee` (LP pool fee tier), `swapFee` (router fee for the WETH→token swap), and `tickLower`/`tickUpper` (price range).
+
+Weights across all slice types must sum to exactly 10,000 bps.
 
 ### 5.3 Lifecycle
 
 ```
-1. Owner:  setPortfolioConfig(id, assets)   — define basket
-2. User:   mint(alice, id, amount)          — ETH → reserve[id]
-3. Keeper: deploy(id, minAmounts)           — reserve ETH → ERC20 basket via Uniswap
-4. Keeper: rebalance(id, instructions)      — periodic weight rebalancing
-5. User:   divest(id, amount, minEthOut)    — pro-rata share of basket → ETH (no fee)
+1. Owner:  setPortfolioConfig(id, assets)                    — define basket
+2. Owner:  setDefaultAavePool(pool)                          — required if any AAVE slice
+3. User:   mint(alice, id, amount)                           — ETH → reserve[id]
+4. Keeper: deploy(id, erc20MinAmounts, lpSwapMin, lp0Min, lp1Min)
+                                                             — reserve ETH → basket
+5. Keeper: rebalance(id, instructions)                       — ERC20 slices only
+6. User:   divest(id, amount, minEthOut)                     — pro-rata basket → ETH
 ```
 
-After `deploy()`, `portfolioActive[id]` is set to `true` and `reserve[id]` is zeroed. The ETH is now represented by `portfolioHoldings` — per-asset ERC20 balances held by the proxy.
+After `deploy()`, `portfolioActive[id]` is set to `true` and `reserve[id]` is zeroed. The five-parameter signature separates slippage guards by slice type: `erc20MinAmounts` is an array covering ERC20 slices in order; the three LP parameters guard the V3 position mint.
 
-### 5.4 Divest
+### 5.4 Deploying
 
-A holder calls `divest(id, amount, minEthOut)`. The contract:
-1. Calculates the caller's pro-rata share of each ERC20 holding.
-2. Sells each ERC20 back to WETH via Uniswap (single-hop or multi-hop).
-3. Unwraps WETH to ETH.
-4. Sends ETH to the caller.
+The keeper calls `deploy(id, erc20MinAmounts, lpSwapAmountOutMin, lpAmount0Min, lpAmount1Min)`:
+
+1. The entire `reserve[id]` is wrapped to WETH.
+2. Assets are processed in order. The last asset receives all remaining WETH (no rounding dust).
+3. Per-slice dispatch:
+   - **ERC20**: swaps the allocated WETH to `token` via Uniswap V3 using `erc20MinAmounts[i]`.
+   - **AAVE**: deposits allocated WETH into Aave V3 via the shared proxy account (`defaultAavePool`). `portfolioAaveWeth[id]` records the deposited amount for per-ID accounting.
+   - **LP**: swaps half the allocated WETH to `token` via the swap router (`lpSwapAmountOutMin`), then mints a Uniswap V3 position (`lpAmount0Min`, `lpAmount1Min`). The position NFT is held by the proxy. Any token amounts unused by the position manager (current price ratio mismatch) are unwrapped back to ETH and added to `reserve[id]` as leftover.
+4. `portfolioActive[id]` is set to `true`.
+
+### 5.5 Shared Aave Account (B2 Model)
+
+All AAVE slices across all portfolio IDs, plus all standalone Leverage tokens, share a single Aave account at the proxy address. This means:
+
+- There is **one aggregate health factor** for the entire proxy's Aave position.
+- `portfolioAaveWeth[id]` tracks per-ID deposited WETH for proportional withdrawal, but does not isolate health risk.
+- A sufficiently large borrow on one leverage token will affect the health factor seen by all other IDs.
+- In a portfolio with no leverage tokens and no borrowed debt, the health factor is effectively infinite — AAVE slices in portfolios are collateral-only positions (no borrowing), so they cannot be liquidated in isolation.
+
+See Section 8 for the associated security note.
+
+### 5.6 Divest
+
+A holder calls `divest(id, amount, minEthOut)`. The contract dispatches per slice type using a pre-computed `supply` snapshot (before the burn reduces it):
+
+- **ERC20**: sells `holdings × amount / supply` of each token back to WETH via Uniswap.
+- **AAVE**: withdraws `portfolioAaveWeth[id] × amount / supply` WETH from Aave.
+- **LP**: removes `lpLiquidity × amount / supply` liquidity from the V3 position. The last holder receives all remaining liquidity to avoid dust. Collected tokenB is swapped to WETH.
+
+All WETH is unwrapped and combined with the proportional share of `reserve[id]` (undeployed leftovers and collected fees). The total ETH is sent to the caller. Reverts if below `minEthOut`.
 
 No burn fee applies. When all tokens have been divested, `portfolioActive[id]` resets and the owner may reconfigure the basket.
 
-### 5.5 Rebalancing
+### 5.7 Rebalancing
 
-The keeper submits `RebalanceInstruction[]` — a set of sell/buy pairs computed off-chain. The contract executes each swap against Uniswap V3. Slippage tolerance is enforced globally via `slippageToleranceBps`.
+The keeper submits `RebalanceInstruction[]` — a set of sell/buy pairs computed off-chain against the ERC20 slice holdings. The contract executes each swap against Uniswap V3. Slippage tolerance is enforced globally via `slippageToleranceBps`. AAVE and LP slices are not rebalanced — their positions change only via `deploy` and `divest`.
 
 ---
 
@@ -358,6 +401,7 @@ An optional Chainlink ETH/USD feed can be registered per leverage token. When co
 | LTV cap | Hard-coded 10% ceiling on leverage regardless of keeper instruction |
 | Wrap safety | ERC20 wrapper rejects leverage, portfolio-active, and LP-active tokens at deposit |
 | Mutual exclusion | Each token ID is strictly one type. All three config setters (`setPortfolioConfig`, `setLPConfig`, `setLeverageConfig`) and both deploy calls (`deploy`, `deployLP`) reject cross-type combinations at the earliest possible point |
+| Shared Aave account | All AAVE slices and leverage tokens share one proxy-level Aave account. A leveraged position's debt contributes to the aggregate health factor. Portfolio AAVE slices alone hold no debt and cannot be liquidated; the risk materialises only when leverage tokens with outstanding debt coexist on the same proxy |
 
 ---
 
@@ -385,7 +429,7 @@ The only state transition that removes a type binding is a full exit: `divestLP`
 | Type | Reserve | Pricing | Exit | Fee |
 |---|---|---|---|---|
 | **Standard** | ETH in `reserve[id]` | Step-tier bonding curve | `burn()` | Quadratic (0–80%) |
-| **Portfolio** | ERC20 basket via Uniswap V3 | Step-tier bonding curve | `divest()` | None |
+| **Portfolio** | Mixed: ERC20 (Uniswap V3), AAVE (Aave V3 collateral), LP (Uniswap V3 position) | Step-tier bonding curve | `divest()` | None |
 | **LP** | Uniswap V3 LP position NFT | Step-tier bonding curve | `divestLP()` | None |
 | **Leverage** | WETH collateral via Aave V3 | Step-tier bonding curve | `divestLeverage()` | None |
 | **ERC20 Wrapper** | Backed 1:1 by Standard ERC1155 | Market price | `unwrap()` then `burn()` | None (burn fee on underlying) |
