@@ -410,7 +410,7 @@ contract("SmartfolioLiquidityMarket", (accounts) => {
 
       await expectRevert(
         sf.setPortfolioConfig(TOKEN_ID, [
-          { token: tokenB.address, weightBps: 10000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" }
+          { assetType: 0, token: tokenB.address, weightBps: 10000, poolFee: 3000, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" }
         ], { from: owner })
       );
     });

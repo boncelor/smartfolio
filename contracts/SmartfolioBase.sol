@@ -94,6 +94,8 @@ abstract contract SmartfolioBase {
     error LiquidityAlreadyActive();
     error LiquidityNotActive();
     error IncompatibleTokenType();
+    error ZeroDefaultAavePool();
+    error NoAaveSlice();
 
     // -------------------------------------------------------------------------
     // Events
@@ -130,10 +132,17 @@ abstract contract SmartfolioBase {
     event LPDeployed(uint256 indexed id, uint256 posTokenId, uint128 liquidity, uint256 ethDeployed);
     event LPFeeCollected(uint256 indexed id, uint256 ethAdded);
     event LPDivested(address indexed account, uint256 indexed id, uint256 amount, uint256 ethReceived);
+    event DefaultAavePoolSet(address pool);
+    event PortfolioAaveDeployed(uint256 indexed id, uint256 wethDeposited);
+    event PortfolioAaveDivested(uint256 indexed id, uint256 wethWithdrawn);
+    event PortfolioLPDeployed(uint256 indexed id, uint256 posTokenId, uint128 liquidity);
+    event PortfolioLPDivested(uint256 indexed id, uint256 wethReceived);
 
     // -------------------------------------------------------------------------
     // Types
     // -------------------------------------------------------------------------
+
+    enum AssetType { ERC20, AAVE, LP }
 
     struct TierConfig {
         uint128 threshold;
@@ -158,11 +167,15 @@ abstract contract SmartfolioBase {
     }
 
     struct PortfolioAsset {
-        address token;
-        uint16 weightBps;
-        uint24 poolFee;
-        bytes swapPath;
-        bytes sellSwapPath;
+        AssetType assetType;
+        address   token;         // ERC20: token address; LP: tokenB; AAVE: unused
+        uint16    weightBps;
+        uint24    poolFee;       // ERC20: swap pool fee; LP: LP pool fee tier
+        uint24    swapFee;       // LP only: fee tier for WETH↔tokenB swap via swapRouter
+        int24     tickLower;     // LP only
+        int24     tickUpper;     // LP only
+        bytes     swapPath;      // ERC20 only: multi-hop buy path
+        bytes     sellSwapPath;  // ERC20 only: multi-hop sell path
     }
 
     struct RebalanceInstruction {
@@ -261,6 +274,24 @@ abstract contract SmartfolioBase {
     ISwapRouter public swapRouter;
     IWETH9 public weth;
     uint16 public slippageToleranceBps;
+
+    // -------------------------------------------------------------------------
+    // State — portfolio Aave slice (shared Aave account, B2 model)
+    // -------------------------------------------------------------------------
+
+    /// @dev Single Aave pool used by all portfolio Aave slices. Same pool as leverage tokens.
+    address public defaultAavePool;
+
+    /// @dev Per-ID WETH deposited into Aave by the portfolio (accounting only; health factor is aggregate).
+    mapping(uint256 => uint256) public portfolioAaveWeth;
+
+    // -------------------------------------------------------------------------
+    // State — portfolio LP slice
+    // -------------------------------------------------------------------------
+
+    mapping(uint256 => uint256) public portfolioLpPositionId;
+    mapping(uint256 => uint128) public portfolioLpLiquidity;
+    mapping(uint256 => bool)    public portfolioLpWethIsToken0;
 
     // -------------------------------------------------------------------------
     // State — leverage

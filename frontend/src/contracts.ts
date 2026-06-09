@@ -353,6 +353,37 @@ export const SMARTFOLIO_ABI = [
     ],
     outputs: [],
   },
+  {
+    name: 'deploy',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'id', type: 'uint256' },
+      { name: 'erc20MinAmounts', type: 'uint256[]' },
+      { name: 'lpSwapAmountOutMin', type: 'uint256' },
+      { name: 'lpAmount0Min', type: 'uint256' },
+      { name: 'lpAmount1Min', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'getPortfolioLPInfo',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'id', type: 'uint256' }],
+    outputs: [
+      { name: 'positionId', type: 'uint256' },
+      { name: 'liquidity', type: 'uint128' },
+      { name: 'aaveWeth', type: 'uint256' },
+    ],
+  },
+  {
+    name: 'portfolioAaveWeth',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'id', type: 'uint256' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
   // ERC1155 approval (needed for wrapping)
   {
     name: 'setApprovalForAll',

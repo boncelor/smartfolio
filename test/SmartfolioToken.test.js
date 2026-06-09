@@ -305,14 +305,14 @@ contract("SmartfolioToken + SmartfolioTokenFactory", (accounts) => {
       await sf.setTiers(TIERS,  { from: owner });
       await sf.setPortfolioConfig(
         PORT_ID,
-        [{ token: tokenA.address, weightBps: 10000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" }],
+        [{ assetType: 0, token: tokenA.address, weightBps: 10000, poolFee: 3000, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" }],
         { from: owner }
       );
 
       // Mint tokens so there is a reserve, then deploy → portfolioActive[PORT_ID] = true.
       const cost = await sf.mintCost(5);
       await sf.mint(alice, PORT_ID, 5, "0x", { from: alice, value: cost });
-      await sf.deploy(PORT_ID, [0], { from: owner });
+      await sf.deploy(PORT_ID, [0], 0, 0, 0, { from: owner });
 
       // Deploy a wrapper for the portfolio token ID.
       await factory.deploy(PORT_ID, "Smartfolio Port 6", "SFP6", { from: owner });

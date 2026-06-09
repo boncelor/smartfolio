@@ -602,8 +602,8 @@ contract("Smartfolio", (accounts) => {
   const WETH    = "0x4444444444444444444444444444444444444444";
 
   const VALID_ASSETS = [
-    { token: TOKEN_A, weightBps: 6000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
-    { token: TOKEN_B, weightBps: 4000, poolFee: 500,  swapPath: "0x", sellSwapPath: "0x" },
+    { assetType: 0, token: TOKEN_A, weightBps: 6000, poolFee: 3000, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+    { assetType: 0, token: TOKEN_B, weightBps: 4000, poolFee: 500,  swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
   ];
 
   describe("setKeeper", () => {
@@ -720,7 +720,7 @@ contract("Smartfolio", (accounts) => {
     it("replaces a previous config", async () => {
       await sf.setPortfolioConfig(TOKEN_ID, VALID_ASSETS, { from: owner });
       const newAssets = [
-        { token: TOKEN_A, weightBps: 10000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: 0, token: TOKEN_A, weightBps: 10000, poolFee: 3000, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
       ];
       await sf.setPortfolioConfig(TOKEN_ID, newAssets, { from: owner });
       const config = await sf.getPortfolioConfig(TOKEN_ID);
@@ -730,8 +730,8 @@ contract("Smartfolio", (accounts) => {
 
     it("reverts if weights do not sum to 10000", async () => {
       const bad = [
-        { token: TOKEN_A, weightBps: 6000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
-        { token: TOKEN_B, weightBps: 3000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" }, // sum = 9000
+        { assetType: 0, token: TOKEN_A, weightBps: 6000, poolFee: 3000, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: 0, token: TOKEN_B, weightBps: 3000, poolFee: 3000, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" }, // sum = 9000
       ];
       await expectRevert(
         sf.setPortfolioConfig(TOKEN_ID, bad, { from: owner }),
@@ -741,8 +741,8 @@ contract("Smartfolio", (accounts) => {
 
     it("reverts if a weight is zero", async () => {
       const bad = [
-        { token: TOKEN_A, weightBps: 0,     poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
-        { token: TOKEN_B, weightBps: 10000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: 0, token: TOKEN_A, weightBps: 0,     poolFee: 3000, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: 0, token: TOKEN_B, weightBps: 10000, poolFee: 3000, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
       ];
       await expectRevert(
         sf.setPortfolioConfig(TOKEN_ID, bad, { from: owner }),
@@ -753,9 +753,13 @@ contract("Smartfolio", (accounts) => {
     it("reverts if a token address is zero", async () => {
       const bad = [
         {
+          assetType: 0,
           token: "0x0000000000000000000000000000000000000000",
           weightBps: 10000,
           poolFee: 3000,
+          swapFee: 0,
+          tickLower: 0,
+          tickUpper: 0,
           swapPath: "0x",
           sellSwapPath: "0x",
         },
@@ -768,7 +772,7 @@ contract("Smartfolio", (accounts) => {
 
     it("reverts for an invalid pool fee tier", async () => {
       const bad = [
-        { token: TOKEN_A, weightBps: 10000, poolFee: 1234, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: 0, token: TOKEN_A, weightBps: 10000, poolFee: 1234, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
       ];
       await expectRevert(
         sf.setPortfolioConfig(TOKEN_ID, bad, { from: owner }),
@@ -778,7 +782,7 @@ contract("Smartfolio", (accounts) => {
 
     it("accepts all three valid pool fee tiers", async () => {
       for (const fee of [500, 3000, 10000]) {
-        const assets = [{ token: TOKEN_A, weightBps: 10000, poolFee: fee, swapPath: "0x", sellSwapPath: "0x" }];
+        const assets = [{ assetType: 0, token: TOKEN_A, weightBps: 10000, poolFee: fee, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" }];
         await sf.setPortfolioConfig(TOKEN_ID, assets, { from: owner });
         const config = await sf.getPortfolioConfig(TOKEN_ID);
         assert.equal(config[0].poolFee.toString(), fee.toString());
@@ -813,8 +817,8 @@ contract("Smartfolio", (accounts) => {
 
     // Portfolio: 60% tokenA (poolFee 3000), 40% tokenB (poolFee 500)
     const buildAssets = (addrA, addrB) => [
-      { token: addrA, weightBps: 6000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
-      { token: addrB, weightBps: 4000, poolFee: 500,  swapPath: "0x", sellSwapPath: "0x" },
+      { assetType: 0, token: addrA, weightBps: 6000, poolFee: 3000, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+      { assetType: 0, token: addrB, weightBps: 4000, poolFee: 500,  swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
     ];
 
     beforeEach(async () => {
@@ -857,7 +861,7 @@ contract("Smartfolio", (accounts) => {
         const reserveBefore = await sf.reserve(TOKEN_ID);
         assert.ok(new BN(reserveBefore).gt(new BN(0)), "reserve must be > 0 before deploy");
 
-        const tx = await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
+        const tx = await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
 
         // Reserve cleared
         assert.equal((await sf.reserve(TOKEN_ID)).toString(), "0");
@@ -888,8 +892,8 @@ contract("Smartfolio", (accounts) => {
       });
 
       it("reverts if already deployed", async () => {
-        await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
-        await expectRevert(sf.deploy(TOKEN_ID, [0, 0], { from: keeper }), "already deployed");
+        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
+        await expectRevert(sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper }), "already deployed");
       });
 
       it("reverts if no portfolio config", async () => {
@@ -897,28 +901,28 @@ contract("Smartfolio", (accounts) => {
         await sf.setTiers(TIERS, { from: owner });
         const cost = await sf.mintCost(1);
         await sf.mint(alice, OTHER_ID, 1, "0x", { from: alice, value: cost });
-        await expectRevert(sf.deploy(OTHER_ID, [], { from: keeper }), "no portfolio config");
+        await expectRevert(sf.deploy(OTHER_ID, [], 0, 0, 0, { from: keeper }), "no portfolio config");
       });
 
       it("reverts if no reserve", async () => {
         // Deploy once to drain reserve
-        await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
+        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
         // Try to deploy a fresh token ID that has a config but no reserve
         const OTHER_ID = 43;
         await sf.setTiers(TIERS, { from: owner });
         await sf.setPortfolioConfig(OTHER_ID, buildAssets(tokenA.address, tokenB.address), { from: owner });
-        await expectRevert(sf.deploy(OTHER_ID, [0, 0], { from: keeper }), "no reserve to deploy");
+        await expectRevert(sf.deploy(OTHER_ID, [0, 0], 0, 0, 0, { from: keeper }), "no reserve to deploy");
       });
 
       it("reverts if amountsOutMinimum length mismatches config", async () => {
         await expectRevert(
-          sf.deploy(TOKEN_ID, [0], { from: keeper }), // config has 2 assets, only 1 min
+          sf.deploy(TOKEN_ID, [0], 0, 0, 0, { from: keeper }), // config has 2 assets, only 1 min
           "length mismatch"
         );
       });
 
       it("reverts if called by non-keeper", async () => {
-        await expectRevert(sf.deploy(TOKEN_ID, [0, 0], { from: alice }), "not keeper");
+        await expectRevert(sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: alice }), "not keeper");
       });
 
       it("reverts if router is not set", async () => {
@@ -932,11 +936,11 @@ contract("Smartfolio", (accounts) => {
         await sf2.setWETH(mockWETH.address, { from: owner });
         const cost = await sf2.mintCost(1);
         await sf2.mint(alice, TOKEN_ID, 1, "0x", { from: alice, value: cost });
-        await expectRevert(sf2.deploy(TOKEN_ID, [0, 0], { from: keeper }), "router not set");
+        await expectRevert(sf2.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper }), "router not set");
       });
 
       it("blocks setPortfolioConfig once portfolio is active", async () => {
-        await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
+        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
         await expectRevert(
           sf.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address), { from: owner }),
           "portfolio is active"
@@ -944,7 +948,7 @@ contract("Smartfolio", (accounts) => {
       });
 
       it("blocks burn() when portfolio is active", async () => {
-        await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
+        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
         await expectRevert(
           sf.burn(TOKEN_ID, 1, { from: alice }),
           "use divest()"
@@ -957,7 +961,7 @@ contract("Smartfolio", (accounts) => {
     describe("rebalance", () => {
       beforeEach(async () => {
         // Deploy portfolio first
-        await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
+        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
       });
 
       it("executes a sell + buy pair and updates holdings, emits Rebalanced", async () => {
@@ -1028,8 +1032,8 @@ contract("Smartfolio", (accounts) => {
     let sf, tokenA, tokenB, mockWETH, mockRouter;
 
     const buildAssets = (addrA, addrB) => [
-      { token: addrA, weightBps: 6000, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
-      { token: addrB, weightBps: 4000, poolFee: 500,  swapPath: "0x", sellSwapPath: "0x" },
+      { assetType: 0, token: addrA, weightBps: 6000, poolFee: 3000, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+      { assetType: 0, token: addrB, weightBps: 4000, poolFee: 500,  swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
     ];
 
     beforeEach(async () => {
@@ -1060,7 +1064,7 @@ contract("Smartfolio", (accounts) => {
       await sf.mint(alice, TOKEN_ID, 100, "0x", { from: alice, value: cost });
 
       // Deploy portfolio
-      await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
+      await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
     });
 
     // ---- helpers ----
@@ -1147,7 +1151,7 @@ contract("Smartfolio", (accounts) => {
         // Bob mints and redeploys
         const cost = await sf.mintCost(10);
         await sf.mint(bob, TOKEN_ID, 10, "0x", { from: bob, value: cost });
-        await sf.deploy(TOKEN_ID, [0, 0], { from: keeper });
+        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
 
         assert.equal(await sf.portfolioActive(TOKEN_ID), true);
       });

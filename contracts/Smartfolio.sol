@@ -136,7 +136,7 @@ contract Smartfolio is
         _delegateTo(creditMarketFacet);
     }
 
-    function deploy(uint256 id, uint256[] calldata amountsOutMinimum)
+    function deploy(uint256 id, uint256[] calldata erc20MinAmounts, uint256 lpSwapAmountOutMin, uint256 lpAmount0Min, uint256 lpAmount1Min)
         external onlyKeeper nonReentrant
     {
         _delegateTo(marketFacet);
@@ -244,6 +244,12 @@ contract Smartfolio is
         emit PosManagerSet(_posManager);
     }
 
+    function setDefaultAavePool(address pool) external onlyOwner {
+        if (pool == address(0)) revert ZeroDefaultAavePool();
+        defaultAavePool = pool;
+        emit DefaultAavePoolSet(pool);
+    }
+
     function setLPConfig(uint256 id, LPConfig calldata config) external onlyOwner {
         if (config.tokenB == address(0)) revert ZeroAddress();
         if (config.poolFee != 500 && config.poolFee != 3000 && config.poolFee != 10000) revert InvalidPoolFee();
@@ -263,11 +269,22 @@ contract Smartfolio is
         if (isLeverageToken[id]) revert IncompatibleTokenType();
         uint256 totalWeight;
         for (uint256 i = 0; i < assets.length; i++) {
-            if (assets[i].token == address(0)) revert ZeroAddress();
             if (assets[i].weightBps == 0) revert ZeroWeight();
-            if (assets[i].poolFee != 500 && assets[i].poolFee != 3000 && assets[i].poolFee != 10000)
-                revert InvalidPoolFee();
             totalWeight += assets[i].weightBps;
+            AssetType t = assets[i].assetType;
+            if (t == AssetType.ERC20) {
+                if (assets[i].token == address(0)) revert ZeroAddress();
+                if (assets[i].poolFee != 500 && assets[i].poolFee != 3000 && assets[i].poolFee != 10000)
+                    revert InvalidPoolFee();
+            } else if (t == AssetType.LP) {
+                if (assets[i].token == address(0)) revert ZeroAddress();
+                if (assets[i].poolFee != 500 && assets[i].poolFee != 3000 && assets[i].poolFee != 10000)
+                    revert InvalidPoolFee();
+                if (assets[i].swapFee != 500 && assets[i].swapFee != 3000 && assets[i].swapFee != 10000)
+                    revert InvalidPoolFee();
+                if (assets[i].tickLower >= assets[i].tickUpper) revert NoLPConfig();
+            }
+            // AAVE: no additional fields to validate here (pool set globally via setDefaultAavePool)
         }
         if (totalWeight != 10_000) revert WeightsMustSum10000();
         _setPortfolioConfigStorage(id, assets);
@@ -538,6 +555,16 @@ contract Smartfolio is
         info.liquidity   = lpLiquidity[id];
         info.deployedEth = deployedEth[id];
         info.reserve     = reserve[id];
+    }
+
+    function getPortfolioLPInfo(uint256 id) external view returns (
+        uint256 positionId,
+        uint128 liquidity,
+        uint256 aaveWeth
+    ) {
+        positionId = portfolioLpPositionId[id];
+        liquidity  = portfolioLpLiquidity[id];
+        aaveWeth   = portfolioAaveWeth[id];
     }
 
     // -------------------------------------------------------------------------
