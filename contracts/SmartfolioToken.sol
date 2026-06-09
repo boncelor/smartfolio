@@ -10,6 +10,7 @@ import "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 interface ISmartfolioGuard {
     function isLeverageToken(uint256 id) external view returns (bool);
     function portfolioActive(uint256 id) external view returns (bool);
+    function lpActive(uint256 id) external view returns (bool);
 }
 
 /**
@@ -37,6 +38,7 @@ contract SmartfolioToken is ERC20, ERC165, IERC1155Receiver {
     error BatchTransferNotSupported();
     error LeverageTokenNotWrappable();
     error PortfolioTokenNotWrappable();
+    error LPTokenNotWrappable();
 
     event Wrapped(address indexed account, uint256 amount);
     event Unwrapped(address indexed account, uint256 amount);
@@ -91,6 +93,7 @@ contract SmartfolioToken is ERC20, ERC165, IERC1155Receiver {
         ISmartfolioGuard sf = ISmartfolioGuard(address(smartfolio));
         if (sf.isLeverageToken(id))  revert LeverageTokenNotWrappable();
         if (sf.portfolioActive(id))  revert PortfolioTokenNotWrappable();
+        if (sf.lpActive(id))         revert LPTokenNotWrappable();
 
         _mint(from, amount);
         emit Wrapped(from, amount);

@@ -67,7 +67,6 @@ export const SMARTFOLIO_ABI = [
     type: 'function',
     stateMutability: 'view',
     inputs: [
-      { name: 'id', type: 'uint256' },
       { name: 'amount', type: 'uint256' },
     ],
     outputs: [{ name: '', type: 'uint256' }],
@@ -159,6 +158,32 @@ export const SMARTFOLIO_ABI = [
     stateMutability: 'view',
     inputs: [{ name: 'id', type: 'uint256' }],
     outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    name: 'lpActive',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'id', type: 'uint256' }],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    name: 'getLPInfo',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'id', type: 'uint256' }],
+    outputs: [
+      {
+        name: '',
+        type: 'tuple',
+        components: [
+          { name: 'active', type: 'bool' },
+          { name: 'positionId', type: 'uint256' },
+          { name: 'liquidity', type: 'uint128' },
+          { name: 'deployedEth', type: 'uint256' },
+          { name: 'reserve', type: 'uint256' },
+        ],
+      },
+    ],
   },
   {
     name: 'getLeverageInfo',
@@ -314,6 +339,17 @@ export const SMARTFOLIO_ABI = [
       { name: 'minStableOut', type: 'uint256' },
       { name: 'poolFee', type: 'uint24' },
       { name: 'swapPath', type: 'bytes' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'divestLP',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'id', type: 'uint256' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'minEthOut', type: 'uint256' },
     ],
     outputs: [],
   },

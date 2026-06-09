@@ -89,6 +89,10 @@ abstract contract SmartfolioBase {
     error HealthFactorAboveFloor();
     error StalePrice();
     error InvalidPrice();
+    error NoPosManagerSet();
+    error NoLPConfig();
+    error LiquidityAlreadyActive();
+    error LiquidityNotActive();
 
     // -------------------------------------------------------------------------
     // Events
@@ -96,7 +100,7 @@ abstract contract SmartfolioBase {
 
     event Minted(address indexed account, uint256 indexed id, uint256 amount, uint256 ethPaid);
     event Burned(address indexed account, uint256 indexed id, uint256 amount, uint256 ethRefunded, uint256 feePaid);
-    event TiersSet(uint256 indexed id, TierConfig[] tiers);
+    event TiersSet(TierConfig[] tiers);
     event MaxSupplySet(uint256 indexed id, uint256 cap);
     event MaxBurnFeeRateSet(uint256 rate);
     event TreasurySet(address treasury);
@@ -119,6 +123,12 @@ abstract contract SmartfolioBase {
     event TreasuryFacetSet(address facet);
     event MarketFacetSet(address facet);
     event CreditMarketFacetSet(address facet);
+    event LiquidityMarketFacetSet(address facet);
+    event PosManagerSet(address posManager);
+    event LPConfigSet(uint256 indexed id, address tokenB, uint24 poolFee, int24 tickLower, int24 tickUpper);
+    event LPDeployed(uint256 indexed id, uint256 posTokenId, uint128 liquidity, uint256 ethDeployed);
+    event LPFeeCollected(uint256 indexed id, uint256 ethAdded);
+    event LPDivested(address indexed account, uint256 indexed id, uint256 amount, uint256 ethReceived);
 
     // -------------------------------------------------------------------------
     // Types
@@ -186,6 +196,22 @@ abstract contract SmartfolioBase {
         bool    wouldExceedCap;   // true if newLtvBps > maxLtvBps
     }
 
+    struct LPConfig {
+        address tokenB;    // paired token (WETH is always the other side)
+        uint24  poolFee;   // Uniswap V3 pool fee tier for the LP position
+        int24   tickLower; // price range lower bound
+        int24   tickUpper; // price range upper bound
+        uint24  swapFee;   // fee tier for WETH↔tokenB swaps via swapRouter
+    }
+
+    struct LPInfo {
+        bool    active;
+        uint256 positionId;  // Uniswap V3 NFT token ID
+        uint128 liquidity;   // current liquidity units in the position
+        uint256 deployedEth; // original ETH deployed to LP
+        uint256 reserve;     // undeployed ETH (leftovers + collected fees)
+    }
+
     // -------------------------------------------------------------------------
     // Constants
     // -------------------------------------------------------------------------
@@ -212,7 +238,7 @@ abstract contract SmartfolioBase {
     // State — bonding curve
     // -------------------------------------------------------------------------
 
-    mapping(uint256 => TierConfig[]) private _tiers;
+    TierConfig[] private _tiers;
     mapping(uint256 => uint256) public totalMinted;
     mapping(uint256 => uint256) public totalSupply;
     mapping(uint256 => uint256) public reserve;
@@ -255,12 +281,24 @@ abstract contract SmartfolioBase {
     uint256 public priceMaxAge;
 
     // -------------------------------------------------------------------------
+    // State — liquidity pool
+    // -------------------------------------------------------------------------
+
+    mapping(uint256 => LPConfig) public lpConfig;
+    mapping(uint256 => uint256)  public lpPositionId;
+    mapping(uint256 => uint128)  public lpLiquidity;
+    mapping(uint256 => bool)     public lpActive;
+    mapping(uint256 => bool)     public lpWethIsToken0;
+    address public positionManager;
+
+    // -------------------------------------------------------------------------
     // State — facet addresses
     // -------------------------------------------------------------------------
 
     address public treasuryFacet;
     address public marketFacet;
     address public creditMarketFacet;
+    address public liquidityMarketFacet;
 
     // -------------------------------------------------------------------------
     // Modifiers
@@ -275,14 +313,14 @@ abstract contract SmartfolioBase {
     // Internal storage accessors (private state exposed to inheritors)
     // -------------------------------------------------------------------------
 
-    function _getTiers(uint256 id) internal view returns (TierConfig[] storage) {
-        return _tiers[id];
+    function _getTiers() internal view returns (TierConfig[] storage) {
+        return _tiers;
     }
 
-    function _setTiersStorage(uint256 id, TierConfig[] calldata tiers) internal {
-        delete _tiers[id];
+    function _setTiersStorage(TierConfig[] calldata tiers) internal {
+        delete _tiers;
         for (uint256 i = 0; i < tiers.length; i++) {
-            _tiers[id].push(tiers[i]);
+            _tiers.push(tiers[i]);
         }
     }
 
@@ -301,8 +339,8 @@ abstract contract SmartfolioBase {
     // Internal view helpers (used by Smartfolio views and facets)
     // -------------------------------------------------------------------------
 
-    function _mintCost(uint256 id, uint256 amount) internal view returns (uint256 cost) {
-        TierConfig[] storage tiers = _tiers[id];
+    function _mintCost(uint256 amount) internal view returns (uint256 cost) {
+        TierConfig[] storage tiers = _tiers;
         if (tiers.length == 0) revert TiersNotConfigured();
         if (amount == 0) revert AmountZero();
 
@@ -327,7 +365,7 @@ abstract contract SmartfolioBase {
         }
     }
 
-    function _burnFeeRate(uint256 id, uint256 amount) internal view returns (uint256) {
+    function _burnFeeRate(uint256 amount) internal view returns (uint256) {
         uint256 supply = globalTotalSupply;
         if (supply == 0) revert NoSupply();
         if (amount > supply) revert AmountExceedsSupply();
@@ -345,7 +383,7 @@ abstract contract SmartfolioBase {
         if (amount == 0) revert AmountZero();
         if (amount > supply) revert AmountExceedsSupply();
         gross = (amount * reserve[id]) / supply;
-        uint256 rate = _burnFeeRate(id, amount);
+        uint256 rate = _burnFeeRate(amount);
         fee = (gross * rate) / WAD;
         net = gross - fee;
     }

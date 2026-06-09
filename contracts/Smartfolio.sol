@@ -154,6 +154,24 @@ contract Smartfolio is
         _delegateTo(marketFacet);
     }
 
+    function deployLP(uint256 id, uint256 wethForSwap, uint256 swapAmountOutMin, uint256 amount0Min, uint256 amount1Min)
+        external onlyKeeper nonReentrant
+    {
+        _delegateTo(liquidityMarketFacet);
+    }
+
+    function collectFees(uint256 id)
+        external onlyKeeper nonReentrant
+    {
+        _delegateTo(liquidityMarketFacet);
+    }
+
+    function divestLP(uint256 id, uint256 amount, uint256 minEthOut)
+        external nonReentrant whenNotPaused
+    {
+        _delegateTo(liquidityMarketFacet);
+    }
+
     /// @dev Accept ETH sent by WETH.withdraw() during divest / divestLeverage.
     receive() external payable {}
 
@@ -168,7 +186,7 @@ contract Smartfolio is
     function pause() external onlyOwner { _pause(); }
     function unpause() external onlyOwner { _unpause(); }
 
-    function setTiers(uint256 id, TierConfig[] calldata tiers) external onlyOwner {
+    function setTiers(TierConfig[] calldata tiers) external onlyOwner {
         if (tiers.length == 0) revert NoTiersProvided();
         if (tiers[0].pricePerToken == 0) revert PriceMustBePositive();
         for (uint256 i = 1; i < tiers.length; i++) {
@@ -176,8 +194,8 @@ contract Smartfolio is
                 revert TiersNotOrdered();
             if (tiers[i].pricePerToken == 0) revert PriceMustBePositive();
         }
-        _setTiersStorage(id, tiers);
-        emit TiersSet(id, tiers);
+        _setTiersStorage(tiers);
+        emit TiersSet(tiers);
     }
 
 
@@ -220,9 +238,27 @@ contract Smartfolio is
         emit SlippageToleranceSet(bps);
     }
 
+    function setPositionManager(address _posManager) external onlyOwner {
+        if (_posManager == address(0)) revert ZeroAddress();
+        positionManager = _posManager;
+        emit PosManagerSet(_posManager);
+    }
+
+    function setLPConfig(uint256 id, LPConfig calldata config) external onlyOwner {
+        if (config.tokenB == address(0)) revert ZeroAddress();
+        if (config.poolFee != 500 && config.poolFee != 3000 && config.poolFee != 10000) revert InvalidPoolFee();
+        if (config.swapFee != 500 && config.swapFee != 3000 && config.swapFee != 10000) revert InvalidPoolFee();
+        if (config.tickLower >= config.tickUpper) revert NoLPConfig();
+        if (lpActive[id]) revert LiquidityAlreadyActive();
+        if (portfolioActive[id]) revert PortfolioActive();
+        lpConfig[id] = config;
+        emit LPConfigSet(id, config.tokenB, config.poolFee, config.tickLower, config.tickUpper);
+    }
+
     function setPortfolioConfig(uint256 id, PortfolioAsset[] calldata assets) external onlyOwner {
         if (assets.length == 0) revert NoAssetsProvided();
         if (portfolioActive[id]) revert PortfolioActive();
+        if (lpActive[id]) revert LiquidityAlreadyActive();
         uint256 totalWeight;
         for (uint256 i = 0; i < assets.length; i++) {
             if (assets[i].token == address(0)) revert ZeroAddress();
@@ -303,20 +339,26 @@ contract Smartfolio is
         emit CreditMarketFacetSet(facet);
     }
 
+    function setLiquidityMarketFacet(address facet) external onlyOwner {
+        if (facet == address(0)) revert ZeroAddress();
+        liquidityMarketFacet = facet;
+        emit LiquidityMarketFacetSet(facet);
+    }
+
     // -------------------------------------------------------------------------
     // View layer
     // -------------------------------------------------------------------------
 
-    function mintCost(uint256 id, uint256 amount) public view returns (uint256) {
-        return _mintCost(id, amount);
+    function mintCost(uint256 amount) public view returns (uint256) {
+        return _mintCost(amount);
     }
 
-    function getTiers(uint256 id) external view returns (TierConfig[] memory) {
-        return _getTiers(id);
+    function getTiers() external view returns (TierConfig[] memory) {
+        return _getTiers();
     }
 
-    function burnFeeRate(uint256 id, uint256 amount) public view returns (uint256) {
-        return _burnFeeRate(id, amount);
+    function burnFeeRate(uint256 amount) public view returns (uint256) {
+        return _burnFeeRate(amount);
     }
 
     function burnRefund(uint256 id, uint256 amount)
@@ -325,15 +367,15 @@ contract Smartfolio is
         return _burnRefund(id, amount);
     }
 
-    function simulateMint(uint256 id, uint256 amount) external view returns (uint256) {
-        return _mintCost(id, amount);
+    function simulateMint(uint256 amount) external view returns (uint256) {
+        return _mintCost(amount);
     }
 
     function simulateBurn(uint256 id, uint256 amount)
         external view returns (BurnSimulation memory sim)
     {
         (sim.gross, sim.fee, sim.net) = _burnRefund(id, amount);
-        sim.feeRate = _burnFeeRate(id, amount);
+        sim.feeRate = _burnFeeRate(amount); // global fee rate — not per-ID
     }
 
     function tokenInfo(uint256 id) external view returns (TokenInfo memory info) {
@@ -344,11 +386,12 @@ contract Smartfolio is
 
         info.reserve = reserve[id];
         info.backingPerToken = supply > 0 ? (reserve[id] * WAD) / supply : 0;
-        TierConfig[] storage tiers = _getTiers(id);
+        TierConfig[] storage tiers = _getTiers();
         if (tiers.length > 0) {
             uint256 lastTier = tiers.length - 1;
+            uint256 globalSupply = globalTotalSupply;
             for (uint256 i = 0; i < tiers.length; i++) {
-                if (i == lastTier || minted < tiers[i].threshold) {
+                if (i == lastTier || globalSupply < tiers[i].threshold) {
                     info.currentTierIndex = i;
                     info.currentPrice = tiers[i].pricePerToken;
                     break;
@@ -483,6 +526,14 @@ contract Smartfolio is
             : type(uint256).max;
 
         sim.wouldExceedCap = sim.newLtvBps > cfg.maxLtvBps;
+    }
+
+    function getLPInfo(uint256 id) external view returns (LPInfo memory info) {
+        info.active      = lpActive[id];
+        info.positionId  = lpPositionId[id];
+        info.liquidity   = lpLiquidity[id];
+        info.deployedEth = deployedEth[id];
+        info.reserve     = reserve[id];
     }
 
     // -------------------------------------------------------------------------

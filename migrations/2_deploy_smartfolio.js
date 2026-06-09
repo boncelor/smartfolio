@@ -1,8 +1,9 @@
 const { deployProxy } = require("@openzeppelin/truffle-upgrades");
-const Smartfolio             = artifacts.require("Smartfolio");
-const SmartfolioTreasury     = artifacts.require("SmartfolioTreasury");
-const SmartfolioMarket       = artifacts.require("SmartfolioMarket");
-const SmartfolioCreditMarket = artifacts.require("SmartfolioCreditMarket");
+const Smartfolio                  = artifacts.require("Smartfolio");
+const SmartfolioTreasury          = artifacts.require("SmartfolioTreasury");
+const SmartfolioMarket            = artifacts.require("SmartfolioMarket");
+const SmartfolioCreditMarket      = artifacts.require("SmartfolioCreditMarket");
+const SmartfolioLiquidityMarket   = artifacts.require("SmartfolioLiquidityMarket");
 
 module.exports = async function (deployer, network, accounts) {
   const initialOwner = accounts[0];
@@ -10,19 +11,25 @@ module.exports = async function (deployer, network, accounts) {
   await deployer.deploy(SmartfolioTreasury);
   await deployer.deploy(SmartfolioMarket);
   await deployer.deploy(SmartfolioCreditMarket);
+  await deployer.deploy(SmartfolioLiquidityMarket);
 
-  const treasury     = await SmartfolioTreasury.deployed();
-  const market       = await SmartfolioMarket.deployed();
-  const creditMarket = await SmartfolioCreditMarket.deployed();
+  const treasury          = await SmartfolioTreasury.deployed();
+  const market            = await SmartfolioMarket.deployed();
+  const creditMarket      = await SmartfolioCreditMarket.deployed();
+  const liquidityMarket   = await SmartfolioLiquidityMarket.deployed();
 
-  await deployProxy(
+  const proxy = await deployProxy(
     Smartfolio,
     [initialOwner, treasury.address, market.address, creditMarket.address],
     { deployer, kind: "uups" }
   );
 
+  // Wire up the liquidity market facet post-deploy
+  await proxy.setLiquidityMarketFacet(liquidityMarket.address);
+
   console.log("Smartfolio deployed (UUPS proxy)");
-  console.log("  TreasuryFacet:     ", treasury.address);
-  console.log("  MarketFacet:       ", market.address);
-  console.log("  CreditMarketFacet: ", creditMarket.address);
+  console.log("  TreasuryFacet:          ", treasury.address);
+  console.log("  MarketFacet:            ", market.address);
+  console.log("  CreditMarketFacet:      ", creditMarket.address);
+  console.log("  LiquidityMarketFacet:   ", liquidityMarket.address);
 };
