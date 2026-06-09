@@ -12,12 +12,15 @@ import KeeperPanel from './components/KeeperPanel'
 import WrapUnwrapPanel from './components/WrapUnwrapPanel'
 import LPInfoCard from './components/LPInfoCard'
 import DivestLPForm from './components/DivestLPForm'
+import SMFInfoCard from './components/SMFInfoCard'
+import SMFPanel from './components/SMFPanel'
 
-type Tab = 'mint' | 'burn' | 'divest' | 'leverage' | 'lp' | 'wrap'
+type Tab = 'smf' | 'mint' | 'burn' | 'divest' | 'leverage' | 'lp' | 'wrap'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 const TAB_LABELS: Record<Tab, string> = {
+  smf:      'SMF',
   mint:     'Mint',
   burn:     'Burn',
   divest:   'Divest',
@@ -28,7 +31,7 @@ const TAB_LABELS: Record<Tab, string> = {
 
 export default function App() {
   const [tokenId, setTokenId] = useState<number>(1)
-  const [activeTab, setActiveTab] = useState<Tab>('mint')
+  const [activeTab, setActiveTab] = useState<Tab>('smf')
 
   const isZeroAddress = CONTRACT_ADDRESS === ZERO_ADDRESS
 
@@ -83,7 +86,7 @@ export default function App() {
                 onClick={() => setActiveTab(tab)}
                 className={`px-6 py-3 text-sm font-semibold transition-colors ${
                   activeTab === tab
-                    ? (tab === 'leverage' || tab === 'lp') ? 'tab-active-gold' : 'tab-active-green'
+                    ? (tab === 'leverage' || tab === 'lp' || tab === 'smf') ? 'tab-active-gold' : 'tab-active-green'
                     : 'tab-inactive'
                 }`}
               >
@@ -93,6 +96,12 @@ export default function App() {
           </div>
 
           {/* Tab content */}
+          {activeTab === 'smf' && (
+            <div className="space-y-4">
+              <SMFInfoCard />
+              <SMFPanel tokenId={tokenId} />
+            </div>
+          )}
           {activeTab === 'mint'     && <MintForm tokenId={tokenId} />}
           {activeTab === 'burn'     && <BurnForm tokenId={tokenId} />}
           {activeTab === 'divest'   && <DivestForm tokenId={tokenId} />}

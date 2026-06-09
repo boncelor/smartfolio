@@ -40,6 +40,86 @@ function resolveSMFAddress(): `0x${string}` {
 
 export const SMF_ADDRESS: `0x${string}` = resolveSMFAddress()
 
+export const SMF_ABI = [
+  {
+    name: 'smfTotalSupply',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'conversionFeeBps',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'balanceOf',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'smfMintCost',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'smfForNFT',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'id', type: 'uint256' },
+      { name: 'nftAmount', type: 'uint256' },
+    ],
+    outputs: [
+      { name: 'smfRequired', type: 'uint256' },
+      { name: 'feePaid', type: 'uint256' },
+    ],
+  },
+  {
+    name: 'smfForReserve',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'ethAmount', type: 'uint256' }],
+    outputs: [{ name: 'smfRequired', type: 'uint256' }],
+  },
+  {
+    name: 'buySMF',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: [],
+  },
+  {
+    name: 'mintNFT',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'id', type: 'uint256' },
+      { name: 'nftAmount', type: 'uint256' },
+      { name: 'maxSmfBurn', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'addToNFT',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'id', type: 'uint256' },
+      { name: 'ethAmount', type: 'uint256' },
+      { name: 'maxSmfBurn', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+] as const
+
 export const SMARTFOLIO_ABI = [
   // View functions
   {
