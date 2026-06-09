@@ -96,6 +96,9 @@ abstract contract SmartfolioBase {
     error IncompatibleTokenType();
     error ZeroDefaultAavePool();
     error NoAaveSlice();
+    error CallerNotSMFContract();
+    error SMFTiersNotConfigured();
+    error InsufficientSMF();
 
     // -------------------------------------------------------------------------
     // Events
@@ -137,6 +140,9 @@ abstract contract SmartfolioBase {
     event PortfolioAaveDivested(uint256 indexed id, uint256 wethWithdrawn);
     event PortfolioLPDeployed(uint256 indexed id, uint256 posTokenId, uint128 liquidity);
     event PortfolioLPDivested(uint256 indexed id, uint256 wethReceived);
+    event SMFContractSet(address smfContract);
+    event MintFunded(address indexed account, uint256 indexed id, uint256 amount, uint256 ethReceived);
+    event ReserveAdded(uint256 indexed id, uint256 ethAdded);
 
     // -------------------------------------------------------------------------
     // Types
@@ -331,6 +337,12 @@ abstract contract SmartfolioBase {
     address public marketFacet;
     address public creditMarketFacet;
     address public liquidityMarketFacet;
+
+    // -------------------------------------------------------------------------
+    // State — SMF ERC20 integration
+    // -------------------------------------------------------------------------
+
+    address public smfContract;
 
     // -------------------------------------------------------------------------
     // Modifiers

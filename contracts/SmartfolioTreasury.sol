@@ -83,6 +83,26 @@ contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
         }
     }
 
+    function mintFunded(address to, uint256 id, uint256 amount) external payable {
+        if (msg.value == 0) revert InsufficientETH();
+        if (amount == 0) revert AmountZero();
+
+        totalMinted[id] += amount;
+        totalSupply[id] += amount;
+        reserve[id] += msg.value;
+        globalTotalMinted += amount;
+        globalTotalSupply += amount;
+
+        _mint(to, id, amount, "");
+        emit MintFunded(to, id, amount, msg.value);
+    }
+
+    function addReserve(uint256 id) external payable {
+        if (msg.value == 0) revert InsufficientETH();
+        reserve[id] += msg.value;
+        emit ReserveAdded(id, msg.value);
+    }
+
     function burn(uint256 id, uint256 amount) external {
         if (portfolioActive[id]) revert UseDivest();
         if (lpActive[id])        revert UseDivest();

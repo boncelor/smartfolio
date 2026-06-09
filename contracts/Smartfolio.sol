@@ -104,6 +104,20 @@ contract Smartfolio is
         _delegateTo(treasuryFacet);
     }
 
+    function mintFunded(address to, uint256 id, uint256 amount)
+        external payable nonReentrant whenNotPaused
+    {
+        if (msg.sender != smfContract) revert CallerNotSMFContract();
+        _delegateTo(treasuryFacet);
+    }
+
+    function addReserve(uint256 id)
+        external payable nonReentrant whenNotPaused
+    {
+        if (msg.sender != smfContract) revert CallerNotSMFContract();
+        _delegateTo(treasuryFacet);
+    }
+
     function mintLeverage(uint256 id, uint256 amount, bytes memory data)
         external payable nonReentrant whenNotPaused
     {
@@ -364,6 +378,12 @@ contract Smartfolio is
         if (facet == address(0)) revert ZeroAddress();
         liquidityMarketFacet = facet;
         emit LiquidityMarketFacetSet(facet);
+    }
+
+    function setSMFContract(address _smfContract) external onlyOwner {
+        if (_smfContract == address(0)) revert ZeroAddress();
+        smfContract = _smfContract;
+        emit SMFContractSet(_smfContract);
     }
 
     // -------------------------------------------------------------------------
