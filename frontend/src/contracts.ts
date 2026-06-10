@@ -1,18 +1,8 @@
-import artifact from '../../build/contracts/Smartfolio.json'
-
-// Derive contract address: prefer env var, then first deployed network address
 function resolveAddress(): `0x${string}` {
   const envAddr = import.meta.env.VITE_CONTRACT_ADDRESS as string | undefined
   if (envAddr && envAddr.startsWith('0x') && envAddr.length === 42) {
     return envAddr as `0x${string}`
   }
-
-  const networks = artifact.networks as Record<string, { address: string }>
-  const addresses = Object.values(networks).map((n) => n.address)
-  if (addresses.length > 0) {
-    return addresses[0] as `0x${string}`
-  }
-
   return '0x0000000000000000000000000000000000000000'
 }
 
