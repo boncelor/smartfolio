@@ -285,6 +285,10 @@
     border-bottom: 2px solid #d4af37;
     margin-bottom: -1px;
   }
+  .tab-active-gold-pill {
+    color: #f3e5ab;
+    background: rgba(212,175,55,0.15);
+  }
   .tab-inactive {
     color: rgba(255,255,255,0.35);
   }

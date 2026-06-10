@@ -239,6 +239,13 @@ export const SMARTFOLIO_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
   {
+    name: 'globalTotalMinted',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
     name: 'paused',
     type: 'function',
     stateMutability: 'view',

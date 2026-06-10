@@ -14,6 +14,8 @@ import LPInfoCard from './components/LPInfoCard'
 import DivestLPForm from './components/DivestLPForm'
 import SMFInfoCard from './components/SMFInfoCard'
 import SMFPanel from './components/SMFPanel'
+import NFTList from './components/NFTList'
+import MintNewForm from './components/MintNewForm'
 
 type Tab = 'smf' | 'nft' | 'divest' | 'leverage' | 'lp' | 'wrap'
 
@@ -48,8 +50,14 @@ function TokenIdInput({ tokenId, setTokenId }: { tokenId: number; setTokenId: (v
 }
 
 export default function App() {
-  const [tokenId, setTokenId] = useState<number>(1)
+  const [tokenId, setTokenId] = useState<number>(0)
   const [activeTab, setActiveTab] = useState<Tab>('smf')
+
+  function switchTab(tab: Tab) {
+    setActiveTab(tab)
+    if (tab !== 'nft') setTokenId(tab === 'smf' ? 0 : 1)
+    else setTokenId(0)
+  }
 
   const isZeroAddress = CONTRACT_ADDRESS === ZERO_ADDRESS
 
@@ -82,7 +90,7 @@ export default function App() {
             {(Object.keys(TAB_LABELS) as Tab[]).map((tab) => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => switchTab(tab)}
                 className={`px-6 py-3 text-sm font-semibold transition-colors ${
                   activeTab === tab
                     ? (tab === 'leverage' || tab === 'lp' || tab === 'smf') ? 'tab-active-gold' : 'tab-active-green'
@@ -98,16 +106,34 @@ export default function App() {
           {activeTab === 'smf' && (
             <div className="space-y-4">
               <SMFInfoCard />
-              <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
-              <SMFPanel tokenId={tokenId} />
+              <SMFPanel />
             </div>
           )}
           {activeTab === 'nft' && (
             <div className="space-y-4">
-              <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
-              <InfoCard tokenId={tokenId} />
-              <MintForm tokenId={tokenId} />
-              <BurnForm tokenId={tokenId} />
+              {tokenId === 0 ? (
+                <>
+                  <NFTList onSelect={(id) => setTokenId(id)} />
+                  <MintNewForm />
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setTokenId(0)}
+                    className="flex items-center gap-2 text-sm"
+                    style={{ color: 'rgba(212,175,55,0.6)' }}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="15 18 9 12 15 6"/>
+                    </svg>
+                    All NFTs
+                  </button>
+                  <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
+                  <InfoCard tokenId={tokenId} />
+                  <MintForm tokenId={tokenId} />
+                  <BurnForm tokenId={tokenId} />
+                </>
+              )}
             </div>
           )}
           {activeTab === 'divest' && (

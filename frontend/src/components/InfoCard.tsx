@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useReadContracts, useReadContract, useAccount } from 'wagmi'
 import { formatEther } from 'viem'
 import { CONTRACT_ADDRESS, SMARTFOLIO_ABI } from '../contracts'
@@ -7,10 +8,13 @@ interface Props {
 }
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+const METADATA_BASE = import.meta.env.VITE_METADATA_URL as string | undefined
 
 export default function InfoCard({ tokenId }: Props) {
   const { address, isConnected } = useAccount()
   const isZeroAddress = CONTRACT_ADDRESS === ZERO_ADDRESS
+
+  const [imageUri, setImageUri] = useState<string | null>(null)
 
   const { data, isPending } = useReadContracts({
     contracts: [
@@ -27,9 +31,7 @@ export default function InfoCard({ tokenId }: Props) {
         args: [BigInt(tokenId)],
       },
     ],
-    query: {
-      enabled: !isZeroAddress,
-    },
+    query: { enabled: !isZeroAddress },
   })
 
   const { data: balance } = useReadContract({
@@ -37,10 +39,18 @@ export default function InfoCard({ tokenId }: Props) {
     abi: SMARTFOLIO_ABI,
     functionName: 'balanceOf',
     args: [address!, BigInt(tokenId)],
-    query: {
-      enabled: isConnected && !!address && !isZeroAddress,
-    },
+    query: { enabled: isConnected && !!address && !isZeroAddress },
   })
+
+  // Fetch metadata image from API
+  useEffect(() => {
+    if (!METADATA_BASE || !tokenId) return
+    setImageUri(null)
+    fetch(`${METADATA_BASE}/api/metadata/${tokenId}`)
+      .then((r) => r.json())
+      .then((meta) => { if (meta.image) setImageUri(meta.image) })
+      .catch(() => {})
+  }, [tokenId])
 
   if (isZeroAddress) {
     return (
@@ -77,6 +87,16 @@ export default function InfoCard({ tokenId }: Props) {
 
   return (
     <div className="card space-y-4">
+      {/* NFT image */}
+      {imageUri && (
+        <img
+          src={imageUri}
+          alt={`Smartfolio #${tokenId}`}
+          className="w-full rounded-lg"
+          style={{ border: '1px solid rgba(212,175,55,0.15)' }}
+        />
+      )}
+
       {/* Row 1 */}
       <div className="grid grid-cols-3 gap-4">
         <div>
