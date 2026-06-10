@@ -187,7 +187,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json(metadata)
 
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
     console.error(err)
-    return res.status(500).json({ error: 'Failed to fetch token data' })
+    return res.status(500).json({ error: msg })
   }
 }
