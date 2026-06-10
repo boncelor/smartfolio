@@ -86,7 +86,7 @@ export default function MintNewForm() {
             <div className="space-y-2">
               <div className="flex items-center justify-between box-info">
                 <span className="stat-label" style={{ marginBottom: 0 }}>SMF to burn</span>
-                <span className="font-semibold text-gold">{smfRequired.toString()} SMF</span>
+                <span className="font-semibold text-gold">{formatEther(smfRequired)} SMF</span>
               </div>
               {ethNeeded !== undefined && (
                 <div className="flex items-center justify-between box-info">

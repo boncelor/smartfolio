@@ -16,7 +16,7 @@ export default function NFTList({ onSelect }: Props) {
     query: { enabled: isConnected && !!address },
   })
 
-  const maxId = globalMinted ? Math.min(Number(globalMinted), 100) : 0
+  const maxId = globalMinted !== undefined ? Math.min(Number(globalMinted), 100) : -1
 
   const balanceCalls = Array.from({ length: maxId }, (_, i) => ({
     address: CONTRACT_ADDRESS,
@@ -42,7 +42,7 @@ export default function NFTList({ onSelect }: Props) {
     )
   }
 
-  if (maxId === 0 || !balances) {
+  if (maxId === -1 || !balances) {
     return (
       <div className="card">
         <p className="text-sm" style={{ color: 'rgba(212,175,55,0.5)' }}>Loading…</p>
@@ -50,7 +50,7 @@ export default function NFTList({ onSelect }: Props) {
     )
   }
 
-  if (owned.length === 0) {
+  if (maxId === 0 || owned.length === 0) {
     return (
       <div className="card">
         <p className="text-sm" style={{ color: 'rgba(212,175,55,0.5)' }}>You don't hold any Smartfolio NFTs.</p>
