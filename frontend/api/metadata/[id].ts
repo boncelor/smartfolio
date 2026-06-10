@@ -3,7 +3,6 @@ import { createPublicClient, http, formatEther } from 'viem'
 import { sepolia } from 'viem/chains'
 
 const CONTRACT_ADDRESS = process.env.VITE_CONTRACT_ADDRESS as `0x${string}`
-const ALCHEMY_API_KEY  = process.env.ALCHEMY_API_KEY as string
 
 const SMARTFOLIO_ABI = [
   {
@@ -140,7 +139,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const client = createPublicClient({
       chain: sepolia,
-      transport: http(`https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}`),
+      transport: http(),
     })
 
     const [info, active] = await Promise.all([
