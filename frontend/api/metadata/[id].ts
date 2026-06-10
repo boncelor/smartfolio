@@ -127,7 +127,7 @@ function buildSvg(
   <rect x="40" y="460" width="420" height="1" rx="0.5" fill="#d4af37" fill-opacity="0.2"/>
 
   <!-- Foreground overlay -->
-  <image href="https://frontend-mu-silk-67.vercel.app/goats.png" x="0" y="0" width="500" height="500" preserveAspectRatio="xMidYMid meet"/>
+  <image href="https://frontend-mu-silk-67.vercel.app/goats.png" x="0" y="0" width="500" height="500" preserveAspectRatio="xMidYMid meet" opacity="0.5"/>
 </svg>`
 }
 
