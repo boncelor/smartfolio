@@ -12,7 +12,6 @@ import KeeperPanel from './components/KeeperPanel'
 import WrapUnwrapPanel from './components/WrapUnwrapPanel'
 import LPInfoCard from './components/LPInfoCard'
 import DivestLPForm from './components/DivestLPForm'
-import SMFInfoCard from './components/SMFInfoCard'
 import SMFPanel from './components/SMFPanel'
 import NFTList from './components/NFTList'
 import MintNewForm from './components/MintNewForm'
@@ -103,12 +102,7 @@ export default function App() {
           </div>
 
           {/* Tab content */}
-          {activeTab === 'smf' && (
-            <div className="space-y-4">
-              <SMFInfoCard />
-              <SMFPanel />
-            </div>
-          )}
+          {activeTab === 'smf' && <SMFPanel />}
           {activeTab === 'nft' && (
             <div className="space-y-4">
               {tokenId === 0 ? (
