@@ -158,7 +158,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ])
 
     const reserve  = parseFloat(formatEther(info.reserve)).toFixed(4)
-    const backing  = parseFloat(formatEther(info.backingPerToken)).toFixed(6)
+    const backing  = parseFloat(formatEther(info.backingPerToken / BigInt(1e18))).toFixed(6)
     const supply   = info.circulatingSupply.toString()
     const tier     = info.currentTierIndex.toString()
     const price    = parseFloat(formatEther(info.currentPrice)).toFixed(4)
