@@ -8,7 +8,6 @@ interface Props {
 }
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
-const METADATA_BASE = import.meta.env.VITE_METADATA_URL as string | undefined
 
 export default function InfoCard({ tokenId }: Props) {
   const { address, isConnected } = useAccount()
@@ -44,9 +43,9 @@ export default function InfoCard({ tokenId }: Props) {
 
   // Fetch metadata image from API
   useEffect(() => {
-    if (!METADATA_BASE || !tokenId) return
+    if (!tokenId) return
     setImageUri(null)
-    fetch(`${METADATA_BASE}/api/metadata/${tokenId}`)
+    fetch(`/api/metadata/${tokenId}`)
       .then((r) => r.json())
       .then((meta) => { if (meta.image) setImageUri(meta.image) })
       .catch(() => {})
