@@ -46,9 +46,10 @@ contract("SmartfolioToken + SmartfolioTokenFactory", (accounts) => {
       { kind: "uups" }
     );
     await sf.setTiers(TIERS, { from: owner });
+    await sf.setSMFContract(owner, { from: owner });
 
     // Mint some ERC1155 tokens to alice so she can wrap them.
-    await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: toWei("0.01") });
+    await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: toWei("0.01") });
 
     factory = await SmartfolioTokenFactory.new(sf.address, owner, { from: owner });
     await factory.deploy(TOKEN_ID, "Smartfolio Fund 1", "SF1", { from: owner });
@@ -182,7 +183,8 @@ contract("SmartfolioToken + SmartfolioTokenFactory", (accounts) => {
         { kind: "uups" }
       );
       await sf2.setTiers(TIERS, { from: owner });
-      await sf2.mint(alice, TOKEN_ID, 5, "0x", { from: alice, value: toWei("0.005") });
+      await sf2.setSMFContract(owner, { from: owner });
+      await sf2.mintFunded(alice, TOKEN_ID, 5, { from: owner, value: toWei("0.005") });
 
       await expectRevert(
         sf2.safeTransferFrom(alice, wrapper.address, TOKEN_ID, 5, "0x", { from: alice })
@@ -192,7 +194,7 @@ contract("SmartfolioToken + SmartfolioTokenFactory", (accounts) => {
     it("reverts if the token ID does not match", async () => {
       const OTHER_ID = 2;
       await sf.setTiers(TIERS, { from: owner });
-      await sf.mint(alice, OTHER_ID, 5, "0x", { from: alice, value: toWei("0.005") });
+      await sf.mintFunded(alice, OTHER_ID, 5, { from: owner, value: toWei("0.005") });
 
       await expectRevert(
         sf.safeTransferFrom(alice, wrapper.address, OTHER_ID, 5, "0x", { from: alice })
@@ -311,7 +313,7 @@ contract("SmartfolioToken + SmartfolioTokenFactory", (accounts) => {
 
       // Mint tokens so there is a reserve, then deploy → portfolioActive[PORT_ID] = true.
       const cost = await sf.mintCost(5);
-      await sf.mint(alice, PORT_ID, 5, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, PORT_ID, 5, { from: owner, value: cost });
       await sf.deploy(PORT_ID, [0], 0, 0, 0, { from: owner });
 
       // Deploy a wrapper for the portfolio token ID.

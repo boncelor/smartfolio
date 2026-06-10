@@ -87,6 +87,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     await sf.setSwapRouter(router.address,   { from: owner });
     await sf.setDefaultAavePool(aave.address,{ from: owner });
     await sf.setPositionManager(npm.address, { from: owner });
+    await sf.setSMFContract(owner, { from: owner });
 
     // Pre-fund router: tokenA and tokenB for WETH→token swaps; WETH for token→WETH sells
     await tokenA.mint(router.address, toWei("100"));
@@ -150,7 +151,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
         { assetType: ERC20_TYPE, token: tokenB.address, weightBps: 4000, poolFee: POOL_FEE, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
       ], { from: owner });
       const cost = await sf.mintCost(10);
-      await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
     });
 
     it("deploys ERC20 basket and marks active", async () => {
@@ -178,7 +179,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
         { assetType: AAVE_TYPE, token: "0x0000000000000000000000000000000000000000", weightBps: 10000, poolFee: 0, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
       ], { from: owner });
       const cost = await sf.mintCost(10);
-      await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
     });
 
     it("deploys WETH to Aave and records portfolioAaveWeth", async () => {
@@ -235,7 +236,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
         { assetType: LP_TYPE, token: tokenB.address, weightBps: 10000, poolFee: POOL_FEE, swapFee: SWAP_FEE, tickLower: TICK_LOW, tickUpper: TICK_HIGH, swapPath: "0x", sellSwapPath: "0x" },
       ], { from: owner });
       const cost = await sf.mintCost(10);
-      await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
     });
 
     it("deploys LP position and records portfolioLpLiquidity", async () => {
@@ -288,7 +289,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     beforeEach(async () => {
       await sf.setPortfolioConfig(TOKEN_ID, mixedConfig(tokenA.address, tokenB.address), { from: owner });
       const cost = await sf.mintCost(10);
-      await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
     });
 
     it("deploy correctly splits ETH across all three types", async () => {
@@ -335,7 +336,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     it("partial divest by alice, remainder by bob", async () => {
       // Bob mints too (equal share)
       const cost = await sf.mintCost(10);
-      await sf.mint(bob, TOKEN_ID, 10, "0x", { from: bob, value: cost });
+      await sf.mintFunded(bob, TOKEN_ID, 10, { from: owner, value: cost });
 
       await sf.deploy(TOKEN_ID, [0], 0, 0, 0, { from: keeper });
 

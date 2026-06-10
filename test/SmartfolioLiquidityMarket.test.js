@@ -79,6 +79,7 @@ contract("SmartfolioLiquidityMarket", (accounts) => {
     await sf.setWETH(weth.address, { from: owner });
     await sf.setSwapRouter(router.address, { from: owner });
     await sf.setPositionManager(npm.address, { from: owner });
+    await sf.setSMFContract(owner, { from: owner });
 
     // Pre-fund router with WETH and tokenB for 1:1 swaps
     await weth.deposit({ value: toWei("1") });
@@ -142,7 +143,7 @@ contract("SmartfolioLiquidityMarket", (accounts) => {
 
       // Mint tokens so there is a reserve
       const cost = await sf.mintCost(10);
-      await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
 
       await sf.deployLP(TOKEN_ID, cost.div(new BN(2)), 0, 0, 0, { from: keeper });
 
@@ -170,7 +171,7 @@ contract("SmartfolioLiquidityMarket", (accounts) => {
 
       // Mint 10 tokens → builds reserve
       mintCost = await sf.mintCost(10);
-      await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: mintCost });
+      await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: mintCost });
     });
 
     it("deploys LP position and marks lpActive", async () => {
@@ -212,13 +213,14 @@ contract("SmartfolioLiquidityMarket", (accounts) => {
       await sf2.setKeeper(keeper, { from: owner });
       await sf2.setWETH(weth.address, { from: owner });
       await sf2.setSwapRouter(router.address, { from: owner });
+      await sf2.setSMFContract(owner, { from: owner });
       // No positionManager set
       await sf2.setLPConfig(TOKEN_ID, {
         tokenB: tokenB.address, poolFee: POOL_FEE,
         tickLower: TICK_LOW, tickUpper: TICK_HIGH, swapFee: SWAP_FEE,
       }, { from: owner });
       const cost2 = await sf2.mintCost(5);
-      await sf2.mint(alice, TOKEN_ID, 5, "0x", { from: alice, value: cost2 });
+      await sf2.mintFunded(alice, TOKEN_ID, 5, { from: owner, value: cost2 });
 
       await expectRevert(sf2.deployLP(TOKEN_ID, 0, 0, 0, 0, { from: keeper }));
     });
@@ -264,7 +266,7 @@ contract("SmartfolioLiquidityMarket", (accounts) => {
         tickLower: TICK_LOW, tickUpper: TICK_HIGH, swapFee: SWAP_FEE,
       }, { from: owner });
       const cost = await sf.mintCost(10);
-      await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
       await sf.deployLP(TOKEN_ID, cost.div(new BN(2)), 0, 0, 0, { from: keeper });
 
       const info = await sf.getLPInfo(TOKEN_ID);
@@ -324,7 +326,7 @@ contract("SmartfolioLiquidityMarket", (accounts) => {
         tickLower: TICK_LOW, tickUpper: TICK_HIGH, swapFee: SWAP_FEE,
       }, { from: owner });
       const cost = await sf.mintCost(10);
-      await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
       await sf.deployLP(TOKEN_ID, cost.div(new BN(2)), 0, 0, 0, { from: keeper });
     });
 
@@ -387,7 +389,7 @@ contract("SmartfolioLiquidityMarket", (accounts) => {
         tickLower: TICK_LOW, tickUpper: TICK_HIGH, swapFee: SWAP_FEE,
       }, { from: owner });
       const cost = await sf.mintCost(5);
-      await sf.mint(alice, TOKEN_ID, 5, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, 5, { from: owner, value: cost });
       await sf.deployLP(TOKEN_ID, cost.div(new BN(2)), 0, 0, 0, { from: keeper });
 
       await expectRevert(sf.burn(TOKEN_ID, 1, { from: alice }));
@@ -405,7 +407,7 @@ contract("SmartfolioLiquidityMarket", (accounts) => {
         tickLower: TICK_LOW, tickUpper: TICK_HIGH, swapFee: SWAP_FEE,
       }, { from: owner });
       const cost = await sf.mintCost(5);
-      await sf.mint(alice, TOKEN_ID, 5, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, 5, { from: owner, value: cost });
       await sf.deployLP(TOKEN_ID, cost.div(new BN(2)), 0, 0, 0, { from: keeper });
 
       await expectRevert(

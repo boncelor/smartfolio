@@ -67,6 +67,7 @@ contract("Smartfolio", (accounts) => {
     const creditMarket = await SmartfolioCreditMarket.new();
     sf = await deployProxy(Smartfolio, [owner, treasury.address, market.address, creditMarket.address], { kind: "uups" });
     await sf.setTiers(TIERS, { from: owner });
+    await sf.setSMFContract(owner, { from: owner });
   });
 
   // ---------------------------------------------------------------------------
@@ -141,7 +142,7 @@ contract("Smartfolio", (accounts) => {
 
     it("prices a mint that spans tier 0 → tier 1", async () => {
       // mint 50 first — globalTotalSupply becomes 50
-      await sf.mint(alice, TOKEN_ID, 50, "0x", { from: alice, value: toWei("0.05") });
+      await sf.mintFunded(alice, TOKEN_ID, 50, { from: owner, value: toWei("0.05") });
 
       // globalTotalSupply = 50; next 100: 50 @ 0.001 (fills tier 0) + 50 @ 0.01
       const cost = await sf.mintCost(100);
@@ -151,7 +152,7 @@ contract("Smartfolio", (accounts) => {
 
     it("prices a mint entirely within tier 1", async () => {
       // globalTotalSupply = 100 after this mint — squarely in tier 1
-      await sf.mint(alice, TOKEN_ID, 100, "0x", { from: alice, value: toWei("0.1") });
+      await sf.mintFunded(alice, TOKEN_ID, 100, { from: owner, value: toWei("0.1") });
       const cost = await sf.mintCost(10);
       assert.equal(cost.toString(), toWei("0.1")); // 10 × 0.01
     });
@@ -185,109 +186,13 @@ contract("Smartfolio", (accounts) => {
   });
 
   // ---------------------------------------------------------------------------
-  // mint
-  // ---------------------------------------------------------------------------
-
-  describe("mint", () => {
-    it("mints tokens, updates state and emits Minted", async () => {
-      const cost = await sf.mintCost(10);
-      const tx = await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: cost });
-
-      assert.equal((await sf.balanceOf(alice, TOKEN_ID)).toString(), "10");
-      assert.equal((await sf.totalSupply(TOKEN_ID)).toString(), "10");
-      assert.equal((await sf.totalMinted(TOKEN_ID)).toString(), "10");
-      assert.equal((await sf.reserve(TOKEN_ID)).toString(), cost.toString());
-
-      const log = tx.logs.find((l) => l.event === "Minted");
-      assert.ok(log);
-      assert.equal(log.args.amount.toString(), "10");
-      assert.equal(log.args.ethPaid.toString(), cost.toString());
-    });
-
-    it("refunds excess ETH", async () => {
-      const cost = await sf.mintCost(1);
-      const overpay = new BN(cost).add(new BN(toWei("1")));
-      const before = new BN(await web3.eth.getBalance(alice));
-      const tx = await sf.mint(alice, TOKEN_ID, 1, "0x", { from: alice, value: overpay });
-      const gasUsed = new BN(tx.receipt.gasUsed);
-      const gasPrice = new BN(tx.receipt.effectiveGasPrice || (await web3.eth.getGasPrice()));
-      const after = new BN(await web3.eth.getBalance(alice));
-      const spent = before.sub(after).sub(gasUsed.mul(gasPrice));
-      // spent should equal cost, not overpay
-      assert.equal(spent.toString(), cost.toString());
-    });
-
-    it("reverts if ETH is insufficient", async () => {
-      await expectRevert(
-        sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: toWei("0.001") }),
-        "insufficient ETH"
-      );
-    });
-
-    it("reverts when paused", async () => {
-      await sf.pause({ from: owner });
-      const cost = await sf.mintCost(1);
-      await expectRevert(
-        sf.mint(alice, TOKEN_ID, 1, "0x", { from: alice, value: cost }),
-        "EnforcedPause"
-      );
-    });
-
-    it("succeeds after unpause", async () => {
-      await sf.pause({ from: owner });
-      await sf.unpause({ from: owner });
-      const cost = await sf.mintCost(1);
-      await sf.mint(alice, TOKEN_ID, 1, "0x", { from: alice, value: cost });
-      assert.equal((await sf.balanceOf(alice, TOKEN_ID)).toString(), "1");
-    });
-
-
-  });
-
-  // ---------------------------------------------------------------------------
-  // mintBatch
-  // ---------------------------------------------------------------------------
-
-  describe("mintBatch", () => {
-    const ID_A = 1;
-    const ID_B = 2;
-
-    beforeEach(async () => {
-      await sf.setTiers(TIERS, { from: owner });
-    });
-
-    it("mints multiple token IDs and updates reserves independently", async () => {
-      const costA = await sf.mintCost(5);
-      const costB = await sf.mintCost(3);
-      const total = new BN(costA).add(new BN(costB));
-
-      await sf.mintBatch(alice, [ID_A, ID_B], [5, 3], "0x", { from: alice, value: total });
-
-      assert.equal((await sf.balanceOf(alice, ID_A)).toString(), "5");
-      assert.equal((await sf.balanceOf(alice, ID_B)).toString(), "3");
-      assert.equal((await sf.reserve(ID_A)).toString(), costA.toString());
-      assert.equal((await sf.reserve(ID_B)).toString(), costB.toString());
-    });
-
-    it("reverts if ETH is insufficient for batch", async () => {
-      const costA = await sf.mintCost(5);
-      await expectRevert(
-        sf.mintBatch(alice, [ID_A, ID_B], [5, 3], "0x", { from: alice, value: costA }),
-        "insufficient ETH"
-      );
-    });
-
-
-  });
-
-  // ---------------------------------------------------------------------------
   // burnFeeRate
   // ---------------------------------------------------------------------------
 
   describe("burnFeeRate", () => {
     beforeEach(async () => {
       const cost = await sf.mintCost(100);
-      await sf.mint(alice, TOKEN_ID, 100, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, 100, { from: owner, value: cost });
     });
 
     it("returns ~0 for a tiny burn proportion", async () => {
@@ -328,7 +233,7 @@ contract("Smartfolio", (accounts) => {
 
     beforeEach(async () => {
       const cost = await sf.mintCost(MINT_AMOUNT);
-      await sf.mint(alice, TOKEN_ID, MINT_AMOUNT, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, MINT_AMOUNT, { from: owner, value: cost });
     });
 
     it("gross equals pro-rata share of reserve", async () => {
@@ -365,7 +270,7 @@ contract("Smartfolio", (accounts) => {
 
     beforeEach(async () => {
       mintCostPaid = await sf.mintCost(MINT_AMOUNT);
-      await sf.mint(alice, TOKEN_ID, MINT_AMOUNT, "0x", { from: alice, value: mintCostPaid });
+      await sf.mintFunded(alice, TOKEN_ID, MINT_AMOUNT, { from: owner, value: mintCostPaid });
     });
 
     it("reduces balance, supply and emits Burned", async () => {
@@ -440,7 +345,7 @@ contract("Smartfolio", (accounts) => {
     beforeEach(async () => {
       await sf.setTreasury(treasury, { from: owner });
       const cost = await sf.mintCost(MINT_AMOUNT);
-      await sf.mint(alice, TOKEN_ID, MINT_AMOUNT, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, MINT_AMOUNT, { from: owner, value: cost });
     });
 
     it("forwards fee to treasury and deducts gross from reserve", async () => {
@@ -525,7 +430,7 @@ contract("Smartfolio", (accounts) => {
 
     it("reflects current tier after minting into tier 1", async () => {
       const cost = await sf.mintCost(100);
-      await sf.mint(alice, TOKEN_ID, 100, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, 100, { from: owner, value: cost });
       const info = await sf.tokenInfo(TOKEN_ID);
       assert.equal(info.currentTierIndex.toString(), "1");
       assert.equal(info.currentPrice.toString(), toWei("0.01"));
@@ -533,7 +438,7 @@ contract("Smartfolio", (accounts) => {
 
     it("reports correct backing per token", async () => {
       const cost = await sf.mintCost(10);
-      await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
       const info = await sf.tokenInfo(TOKEN_ID);
       // backingPerToken = reserve × WAD / supply
       const expected = new BN(cost).mul(WAD).divn(10);
@@ -558,7 +463,7 @@ contract("Smartfolio", (accounts) => {
   describe("simulateBurn", () => {
     beforeEach(async () => {
       const cost = await sf.mintCost(100);
-      await sf.mint(alice, TOKEN_ID, 100, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, 100, { from: owner, value: cost });
     });
 
     it("gross + fee = gross and net = gross - fee", async () => {
@@ -848,10 +753,11 @@ contract("Smartfolio", (accounts) => {
       // Set tiers and portfolio config for TOKEN_ID
       await sf.setTiers(TIERS, { from: owner });
       await sf.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address), { from: owner });
+      await sf.setSMFContract(owner, { from: owner });
 
       // Alice mints 10 tokens (10 × 0.001 ETH = 0.01 ETH in reserve)
       const cost = await sf.mintCost(10);
-      await sf.mint(alice, TOKEN_ID, 10, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
     });
 
     // ---- deploy ----
@@ -900,7 +806,7 @@ contract("Smartfolio", (accounts) => {
         const OTHER_ID = 42;
         await sf.setTiers(TIERS, { from: owner });
         const cost = await sf.mintCost(1);
-        await sf.mint(alice, OTHER_ID, 1, "0x", { from: alice, value: cost });
+        await sf.mintFunded(alice, OTHER_ID, 1, { from: owner, value: cost });
         await expectRevert(sf.deploy(OTHER_ID, [], 0, 0, 0, { from: keeper }), "no portfolio config");
       });
 
@@ -934,8 +840,9 @@ contract("Smartfolio", (accounts) => {
         await sf2.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address), { from: owner });
         await sf2.setKeeper(keeper, { from: owner });
         await sf2.setWETH(mockWETH.address, { from: owner });
+        await sf2.setSMFContract(owner, { from: owner });
         const cost = await sf2.mintCost(1);
-        await sf2.mint(alice, TOKEN_ID, 1, "0x", { from: alice, value: cost });
+        await sf2.mintFunded(alice, TOKEN_ID, 1, { from: owner, value: cost });
         await expectRevert(sf2.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper }), "router not set");
       });
 
@@ -1058,10 +965,11 @@ contract("Smartfolio", (accounts) => {
 
       await sf.setTiers(TIERS, { from: owner });
       await sf.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address), { from: owner });
+      await sf.setSMFContract(owner, { from: owner });
 
       // Alice mints 100 tokens → 0.1 ETH in reserve
       const cost = await sf.mintCost(100);
-      await sf.mint(alice, TOKEN_ID, 100, "0x", { from: alice, value: cost });
+      await sf.mintFunded(alice, TOKEN_ID, 100, { from: owner, value: cost });
 
       // Deploy portfolio
       await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
@@ -1150,7 +1058,7 @@ contract("Smartfolio", (accounts) => {
 
         // Bob mints and redeploys
         const cost = await sf.mintCost(10);
-        await sf.mint(bob, TOKEN_ID, 10, "0x", { from: bob, value: cost });
+        await sf.mintFunded(bob, TOKEN_ID, 10, { from: owner, value: cost });
         await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
 
         assert.equal(await sf.portfolioActive(TOKEN_ID), true);
@@ -1161,7 +1069,7 @@ contract("Smartfolio", (accounts) => {
         const cost = await sf.mintCost(100);
         // Need to undeploy for Bob to add to reserve... actually portfolio is active
         // so Bob can still mint (mint adds to reserve, does not go to portfolio automatically)
-        await sf.mint(bob, TOKEN_ID, 100, "0x", { from: bob, value: cost });
+        await sf.mintFunded(bob, TOKEN_ID, 100, { from: owner, value: cost });
 
         const holdingABefore = new BN(await sf.portfolioHoldings(TOKEN_ID, tokenA.address));
         const supply = new BN(await sf.totalSupply(TOKEN_ID)); // 200
@@ -1214,7 +1122,7 @@ contract("Smartfolio", (accounts) => {
           { from: owner }
         );
         const cost = await sf.mintCost(1);
-        await sf.mint(alice, OTHER_ID, 1, "0x", { from: alice, value: cost });
+        await sf.mintFunded(alice, OTHER_ID, 1, { from: owner, value: cost });
         await expectRevert(
           sf.divest(OTHER_ID, 1, 0, { from: alice }),
           "portfolio not active"
