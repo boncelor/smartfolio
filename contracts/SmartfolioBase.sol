@@ -344,6 +344,9 @@ abstract contract SmartfolioBase {
 
     address public smfContract;
 
+    /// @dev Auto-incremented ID assigned to each new NFT minted via mintFundedNew.
+    uint256 public nextTokenId;
+
     // -------------------------------------------------------------------------
     // Modifiers
     // -------------------------------------------------------------------------

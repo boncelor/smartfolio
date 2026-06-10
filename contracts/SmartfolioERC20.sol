@@ -16,7 +16,7 @@ interface AggregatorV3Interface {
 }
 
 interface ISmartfolio {
-    function mintFunded(address to, uint256 id, uint256 amount) external payable;
+    function mintFundedNew(address to) external payable returns (uint256 id);
     function addReserve(uint256 id) external payable;
 }
 
@@ -203,13 +203,13 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     // -------------------------------------------------------------------------
 
     /**
-     * @notice Burn SMF to mint 1 ERC1155 token of `id`.
-     *         The NFT floor price is $10 USD, converted to ETH via Chainlink oracle.
-     *         The ETH backing of the burned SMF flows into the NFT's reserve.
-     * @param id          Smartfolio ERC1155 token ID to mint.
+     * @notice Burn SMF to mint 1 new ERC1155 NFT. The token ID is auto-assigned by
+     *         the Smartfolio contract. The NFT floor price is $10 USD, converted to
+     *         ETH via Chainlink oracle. The ETH backing flows into the new NFT's reserve.
      * @param maxSmfBurn  Slippage guard — reverts if SMF to burn exceeds this.
+     * @return id         The newly assigned Smartfolio token ID.
      */
-    function mintNFT(uint256 id, uint256 maxSmfBurn) external nonReentrant {
+    function mintNFT(uint256 maxSmfBurn) external nonReentrant returns (uint256 id) {
         if (smartfolio == address(0)) revert SmartfolioNotSet();
 
         // $10 USD → ETH using Chainlink (8-decimal price feed)
@@ -224,7 +224,7 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
         smfTotalSupply -= smfToBurn;
         _burn(msg.sender, smfToBurn);
 
-        ISmartfolio(smartfolio).mintFunded{value: ethNeeded}(msg.sender, id, 1);
+        id = ISmartfolio(smartfolio).mintFundedNew{value: ethNeeded}(msg.sender);
 
         emit NFTMinted(msg.sender, id, smfToBurn, ethNeeded);
     }
@@ -272,16 +272,14 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice Simulate the SMF cost to mint 1 ERC1155 token of `id`.
+     * @notice Simulate the SMF cost to mint 1 new NFT.
      * @return smfRequired  SMF to burn.
      * @return ethNeeded    ETH value locked into the NFT reserve ($10 USD floor).
      */
-    function smfForNFT(uint256 id)
+    function smfForNFT()
         external view
         returns (uint256 smfRequired, uint256 ethNeeded)
     {
-        // id param kept for ABI symmetry / future per-ID pricing
-        id;
         if (smartfolio == address(0)) revert SmartfolioNotSet();
         uint256 ethPrice = _getEthPrice();
         ethNeeded = (NFT_FLOOR_USD * 1e8) / ethPrice;

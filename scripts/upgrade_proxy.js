@@ -2,7 +2,7 @@ const Smartfolio         = artifacts.require("Smartfolio");
 const SmartfolioTreasury = artifacts.require("SmartfolioTreasury");
 
 const PROXY = "0xA24A683d4fE9C8A0a5DC96d175c419ABf70e8206";
-const SMF   = "0x1b29D25723045DF0E63905AD1996708Af3f33b93";
+const SMF   = "0xE913745Fcdf783DaF4BDaCb5612cB32E25980EF3";
 
 module.exports = async function (callback) {
   try {

@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { CONTRACT_ADDRESS } from './contracts'
 import Header from './components/Header'
 import InfoCard from './components/InfoCard'
-import MintForm from './components/MintForm'
 import BurnForm from './components/BurnForm'
 import DivestForm from './components/DivestForm'
 import LeverageInfoCard from './components/LeverageInfoCard'
@@ -124,7 +123,6 @@ export default function App() {
                   </button>
                   <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
                   <InfoCard tokenId={tokenId} />
-                  <MintForm tokenId={tokenId} />
                   <BurnForm tokenId={tokenId} />
                 </>
               )}

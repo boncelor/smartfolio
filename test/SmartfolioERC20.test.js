@@ -228,18 +228,18 @@ contract("SmartfolioERC20", (accounts) => {
     });
 
     it("mints exactly 1 ERC1155 to alice and increases reserve[id]", async () => {
-      const { smfRequired } = await smf.smfForNFT(TOKEN_ID);
+      const { smfRequired } = await smf.smfForNFT();
       const reserveBefore = new BN(await sf.reserve(TOKEN_ID));
 
-      await smf.mintNFT(TOKEN_ID, smfRequired, { from: alice });
+      await smf.mintNFT(smfRequired, { from: alice });
 
       assert.equal((await sf.balanceOf(alice, TOKEN_ID)).toString(), "1");
       assert.ok(new BN(await sf.reserve(TOKEN_ID)).gt(reserveBefore));
     });
 
     it("emits NFTMinted with correct fields", async () => {
-      const { smfRequired, ethNeeded } = await smf.smfForNFT(TOKEN_ID);
-      const tx = await smf.mintNFT(TOKEN_ID, smfRequired, { from: alice });
+      const { smfRequired, ethNeeded } = await smf.smfForNFT();
+      const tx = await smf.mintNFT(smfRequired, { from: alice });
       const log = tx.logs.find((l) => l.event === "NFTMinted");
       assert.ok(log);
       assert.equal(log.args.account, alice);
@@ -250,8 +250,8 @@ contract("SmartfolioERC20", (accounts) => {
 
     it("globalTotalSupply increments by 1", async () => {
       const before = new BN(await sf.globalTotalSupply());
-      const { smfRequired } = await smf.smfForNFT(TOKEN_ID);
-      await smf.mintNFT(TOKEN_ID, smfRequired, { from: alice });
+      const { smfRequired } = await smf.smfForNFT();
+      await smf.mintNFT(smfRequired, { from: alice });
       assert.equal(
         new BN(await sf.globalTotalSupply()).sub(before).toString(), "1"
       );
@@ -259,8 +259,8 @@ contract("SmartfolioERC20", (accounts) => {
 
     it("SMF balance decreases by smfRequired", async () => {
       const balBefore = new BN(await smf.balanceOf(alice));
-      const { smfRequired } = await smf.smfForNFT(TOKEN_ID);
-      await smf.mintNFT(TOKEN_ID, smfRequired, { from: alice });
+      const { smfRequired } = await smf.smfForNFT();
+      await smf.mintNFT(smfRequired, { from: alice });
       assert.equal(
         balBefore.sub(new BN(await smf.balanceOf(alice))).toString(),
         smfRequired.toString()
@@ -268,9 +268,9 @@ contract("SmartfolioERC20", (accounts) => {
     });
 
     it("reserve[id] receives the ETH floor amount", async () => {
-      const { smfRequired, ethNeeded } = await smf.smfForNFT(TOKEN_ID);
+      const { smfRequired, ethNeeded } = await smf.smfForNFT();
       const reserveBefore = new BN(await sf.reserve(TOKEN_ID));
-      await smf.mintNFT(TOKEN_ID, smfRequired, { from: alice });
+      await smf.mintNFT(smfRequired, { from: alice });
       assert.equal(
         new BN(await sf.reserve(TOKEN_ID)).sub(reserveBefore).toString(),
         ethNeeded.toString()
@@ -278,15 +278,15 @@ contract("SmartfolioERC20", (accounts) => {
     });
 
     it("reverts if slippage guard exceeded", async () => {
-      const { smfRequired } = await smf.smfForNFT(TOKEN_ID);
+      const { smfRequired } = await smf.smfForNFT();
       await expectRevert(
-        smf.mintNFT(TOKEN_ID, new BN(smfRequired).sub(new BN("1")), { from: alice })
+        smf.mintNFT(new BN(smfRequired).sub(new BN("1")), { from: alice })
       );
     });
 
     it("reverts if SMF balance insufficient", async () => {
       // Bob has no SMF
-      await expectRevert(smf.mintNFT(TOKEN_ID, toWei("9999"), { from: bob }));
+      await expectRevert(smf.mintNFT(toWei("9999"), { from: bob }));
     });
 
     it("reverts if feed not set", async () => {
@@ -295,7 +295,7 @@ contract("SmartfolioERC20", (accounts) => {
       // no setEthUsdFeed call
       const cost = await smf2.smfMintCost(200);
       await smf2.buySMF(200, { from: alice, value: cost });
-      await expectRevert(smf2.mintNFT(TOKEN_ID, toWei("9999"), { from: alice }));
+      await expectRevert(smf2.mintNFT(toWei("9999"), { from: alice }));
     });
 
     it("reverts if price is stale", async () => {
@@ -303,22 +303,22 @@ contract("SmartfolioERC20", (accounts) => {
       await feed.setUpdatedAt(Math.floor(Date.now() / 1000) - 7200);
       // Don't call smfForNFT — it also reads the oracle and would revert here.
       // Pass a generous maxSmfBurn so the only revert path is the stale price check.
-      await expectRevert(smf.mintNFT(TOKEN_ID, toWei("9999"), { from: alice }));
+      await expectRevert(smf.mintNFT(toWei("9999"), { from: alice }));
     });
 
     it("reverts if price is zero or negative", async () => {
       await feed.setAnswer(0);
       await expectRevert(
-        smf.mintNFT(TOKEN_ID, toWei("9999"), { from: alice })
+        smf.mintNFT(toWei("9999"), { from: alice })
       );
     });
 
     it("ethNeeded reflects oracle price — higher ETH price → less ETH needed", async () => {
       // $6 000/ETH → ETH floor halved
       await feed.setAnswer(6_000e8);
-      const { ethNeeded: ethAt6k } = await smf.smfForNFT(TOKEN_ID);
+      const { ethNeeded: ethAt6k } = await smf.smfForNFT();
       await feed.setAnswer(ETH_PRICE_USD);
-      const { ethNeeded: ethAt3k } = await smf.smfForNFT(TOKEN_ID);
+      const { ethNeeded: ethAt3k } = await smf.smfForNFT();
       assert.ok(new BN(ethAt6k).lt(new BN(ethAt3k)),
         "higher ETH price should require less ETH for the $10 floor");
     });
@@ -332,8 +332,8 @@ contract("SmartfolioERC20", (accounts) => {
     beforeEach(async () => {
       const smfCost = await smf.smfMintCost(200);
       await smf.buySMF(200, { from: alice, value: smfCost });
-      const { smfRequired } = await smf.smfForNFT(TOKEN_ID);
-      await smf.mintNFT(TOKEN_ID, smfRequired, { from: alice });
+      const { smfRequired } = await smf.smfForNFT();
+      await smf.mintNFT(smfRequired, { from: alice });
     });
 
     it("increases reserve[id] without minting new ERC1155", async () => {
@@ -409,8 +409,8 @@ contract("SmartfolioERC20", (accounts) => {
       await smf.buySMF(200, { from: alice, value: smfCost });
 
       // Mint NFT
-      const { smfRequired } = await smf.smfForNFT(TOKEN_ID);
-      await smf.mintNFT(TOKEN_ID, smfRequired, { from: alice });
+      const { smfRequired } = await smf.smfForNFT();
+      await smf.mintNFT(smfRequired, { from: alice });
       assert.equal((await sf.balanceOf(alice, TOKEN_ID)).toString(), "1");
 
       // Add reserve

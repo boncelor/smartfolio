@@ -15,8 +15,7 @@ export default function MintForm({ tokenId }: Props) {
     address: SMF_ADDRESS,
     abi: SMF_ABI,
     functionName: 'smfForNFT',
-    args: [BigInt(tokenId)],
-    query: { enabled: tokenId > 0 },
+    args: [],
   })
   const smfRequired = smfSimulation?.[0]
   const ethNeeded = smfSimulation?.[1]
@@ -33,7 +32,7 @@ export default function MintForm({ tokenId }: Props) {
       address: SMF_ADDRESS,
       abi: SMF_ABI,
       functionName: 'mintNFT',
-      args: [BigInt(tokenId), maxBurn],
+      args: [maxBurn],
     })
   }
 

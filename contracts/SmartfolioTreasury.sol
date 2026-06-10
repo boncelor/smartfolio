@@ -15,6 +15,23 @@ import "./SmartfolioBase.sol";
  */
 contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
 
+    /**
+     * @dev Auto-assigns the next token ID and mints exactly 1 token to `to`.
+     *      Called by the SMF contract for oracle-priced NFT minting.
+     *      Returns the newly assigned token ID via return data (forwarded by _delegateTo).
+     */
+    function mintFundedNew(address to) external payable returns (uint256 id) {
+        if (msg.value == 0) revert InsufficientETH();
+        id = ++nextTokenId;
+        totalMinted[id] += 1;
+        totalSupply[id] += 1;
+        reserve[id] += msg.value;
+        globalTotalMinted += 1;
+        globalTotalSupply += 1;
+        _mint(to, id, 1, "");
+        emit MintFunded(to, id, 1, msg.value);
+    }
+
     function mintFunded(address to, uint256 id, uint256 amount) external payable {
         if (msg.value == 0) revert InsufficientETH();
         if (amount == 0) revert AmountZero();

@@ -1,23 +1,18 @@
-import { useState } from 'react'
 import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi'
+import { useState } from 'react'
 import { formatEther } from 'viem'
 import { SMF_ADDRESS, SMF_ABI } from '../contracts'
 
 export default function MintNewForm() {
   const [open, setOpen] = useState(false)
-  const [tokenId, setTokenId] = useState('')
   const [slippagePct, setSlippagePct] = useState('1')
   const { isConnected } = useAccount()
-
-  const parsedId = parseInt(tokenId) || 0
-  const isValid = parsedId > 0
 
   const { data: smfSimulation } = useReadContract({
     address: SMF_ADDRESS,
     abi: SMF_ABI,
     functionName: 'smfForNFT',
-    args: [BigInt(parsedId)],
-    query: { enabled: isValid },
+    args: [],
   })
   const smfRequired = smfSimulation?.[0]
   const ethNeeded = smfSimulation?.[1]
@@ -27,18 +22,18 @@ export default function MintNewForm() {
     useWaitForTransactionReceipt({ hash: txHash })
 
   function handleMint() {
-    if (!isValid || smfRequired === undefined) return
+    if (smfRequired === undefined) return
     const slippage = 1 + (parseFloat(slippagePct) || 1) / 100
     const maxBurn = BigInt(Math.ceil(Number(smfRequired) * slippage))
     writeContract({
       address: SMF_ADDRESS,
       abi: SMF_ABI,
       functionName: 'mintNFT',
-      args: [BigInt(parsedId), maxBurn],
+      args: [maxBurn],
     })
   }
 
-  const isDisabled = !isConnected || !isValid || smfRequired === undefined || isPending || isConfirming
+  const isDisabled = !isConnected || smfRequired === undefined || isPending || isConfirming
 
   return (
     <div className="card space-y-4">
@@ -68,18 +63,9 @@ export default function MintNewForm() {
 
       {open && (
         <>
-          <div className="space-y-1">
-            <label className="stat-label">Token ID</label>
-            <input
-              type="number"
-              min={1}
-              value={tokenId}
-              onChange={(e) => setTokenId(e.target.value)}
-              placeholder="e.g. 42"
-              className="input-money"
-              style={{ width: '8rem' }}
-            />
-          </div>
+          <p className="text-xs" style={{ color: 'rgba(212,175,55,0.5)' }}>
+            A new NFT will be created with an auto-assigned ID. Each mint costs a $10 USD floor in SMF.
+          </p>
 
           <div className="space-y-1">
             <label className="stat-label">Slippage tolerance</label>
@@ -96,7 +82,7 @@ export default function MintNewForm() {
             </div>
           </div>
 
-          {smfRequired !== undefined && isValid && (
+          {smfRequired !== undefined && (
             <div className="space-y-2">
               <div className="flex items-center justify-between box-info">
                 <span className="stat-label" style={{ marginBottom: 0 }}>SMF to burn</span>

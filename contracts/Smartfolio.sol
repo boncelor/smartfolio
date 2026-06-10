@@ -92,6 +92,13 @@ contract Smartfolio is
         _delegateTo(treasuryFacet);
     }
 
+    function mintFundedNew(address to)
+        external payable nonReentrant whenNotPaused returns (uint256)
+    {
+        if (msg.sender != smfContract) revert CallerNotSMFContract();
+        _delegateTo(treasuryFacet);
+    }
+
     function mintFunded(address to, uint256 id, uint256 amount)
         external payable nonReentrant whenNotPaused
     {
