@@ -13,7 +13,7 @@ export default function Header() {
       <div className="flex items-center justify-between max-w-6xl mx-auto">
         <div className="flex items-center gap-3">
           <span className="text-2xl font-black tracking-tight text-gold">Smartfolio</span>
-          <span className="badge-gold hidden sm:inline">v1</span>
+          <span className="badge-gold hidden sm:inline">v0</span>
         </div>
         <ConnectButton />
       </div>
