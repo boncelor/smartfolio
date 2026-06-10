@@ -5,8 +5,17 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+interface AggregatorV3Interface {
+    function latestRoundData() external view returns (
+        uint80 roundId,
+        int256 answer,
+        uint256 startedAt,
+        uint256 updatedAt,
+        uint80 answeredInRound
+    );
+}
+
 interface ISmartfolio {
-    function mintCost(uint256 amount) external view returns (uint256);
     function mintFunded(address to, uint256 id, uint256 amount) external payable;
     function addReserve(uint256 id) external payable;
 }
@@ -18,8 +27,8 @@ interface ISmartfolio {
  *         Flow:
  *           1. User buys SMF with ETH via buySMF() — bonding curve pricing.
  *           2. User burns SMF to mint a Smartfolio ERC1155 NFT via mintNFT().
+ *              Each NFT costs a $10 USD floor priced via Chainlink ETH/USD oracle.
  *              The ETH backing of the burned SMF flows into the NFT's reserve.
- *              A flat conversion fee (default 1%) is charged and sent to treasury.
  *           3. User burns more SMF into an existing NFT via addToNFT() to increase
  *              its ETH backing (no fee).
  *           4. User burns the ERC1155 NFT via Smartfolio.burn() to recover ETH.
@@ -37,22 +46,24 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     error NoTiersProvided();
     error PriceMustBePositive();
     error TiersNotOrdered();
-    error ExceedsFeeCap();
     error SlippageExceeded();
     error InsufficientSMFBalance();
     error SmartfolioNotSet();
+    error FeedNotSet();
+    error StalePrice();
+    error InvalidPrice();
 
     // -------------------------------------------------------------------------
     // Events
     // -------------------------------------------------------------------------
 
     event TiersSet(TierConfig[] tiers);
-    event ConversionFeeBpsSet(uint256 bps);
     event TreasurySet(address treasury);
     event SmartfolioSet(address smartfolio);
+    event EthUsdFeedSet(address feed);
     event SMFMinted(address indexed account, uint256 amount, uint256 ethPaid);
     event SMFBurned(address indexed account, uint256 amount, uint256 ethOut);
-    event NFTMinted(address indexed account, uint256 indexed id, uint256 nftAmount, uint256 smfBurned, uint256 conversionFee);
+    event NFTMinted(address indexed account, uint256 indexed id, uint256 smfBurned, uint256 ethLocked);
     event ReserveAdded(address indexed account, uint256 indexed id, uint256 ethAmount, uint256 smfBurned);
 
     // -------------------------------------------------------------------------
@@ -68,7 +79,8 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     // Constants
     // -------------------------------------------------------------------------
 
-    uint256 public constant MAX_CONVERSION_FEE_BPS = 500; // 5% hard cap
+    /// @dev $10 USD floor per NFT mint (in USD with 18 decimals for precision).
+    uint256 public constant NFT_FLOOR_USD = 10e18;
 
     // -------------------------------------------------------------------------
     // State
@@ -78,9 +90,10 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     uint256 public smfTotalSupply;   // SMF in circulation (drives bonding curve)
     uint256 public smfTotalMinted;   // cumulative SMF ever minted
 
-    uint256 public conversionFeeBps; // fee on mintNFT (default 100 = 1%)
     address public smartfolio;       // Smartfolio proxy
-    address public treasury;         // receives conversion fees
+    address public treasury;         // future use
+    AggregatorV3Interface public ethUsdFeed;   // Chainlink ETH/USD feed
+    uint256 public priceMaxAge = 30 minutes;   // staleness threshold
 
     // -------------------------------------------------------------------------
     // Constructor
@@ -91,7 +104,6 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
         Ownable(initialOwner)
     {
         if (_smartfolio != address(0)) smartfolio = _smartfolio;
-        conversionFeeBps = 100; // default 1%
     }
 
     // -------------------------------------------------------------------------
@@ -113,12 +125,6 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
         emit TiersSet(tiers);
     }
 
-    function setConversionFeeBps(uint256 bps) external onlyOwner {
-        if (bps > MAX_CONVERSION_FEE_BPS) revert ExceedsFeeCap();
-        conversionFeeBps = bps;
-        emit ConversionFeeBpsSet(bps);
-    }
-
     function setTreasury(address _treasury) external onlyOwner {
         treasury = _treasury;
         emit TreasurySet(_treasury);
@@ -128,6 +134,16 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
         if (_smartfolio == address(0)) revert SmartfolioNotSet();
         smartfolio = _smartfolio;
         emit SmartfolioSet(_smartfolio);
+    }
+
+    function setEthUsdFeed(address feed) external onlyOwner {
+        if (feed == address(0)) revert FeedNotSet();
+        ethUsdFeed = AggregatorV3Interface(feed);
+        emit EthUsdFeedSet(feed);
+    }
+
+    function setPriceMaxAge(uint256 maxAge) external onlyOwner {
+        priceMaxAge = maxAge;
     }
 
     // -------------------------------------------------------------------------
@@ -187,36 +203,30 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     // -------------------------------------------------------------------------
 
     /**
-     * @notice Burn SMF to mint `nftAmount` ERC1155 tokens of `id`.
-     *         The ETH backing of burned SMF flows into the NFT's reserve.
-     *         A conversion fee (conversionFeeBps) is deducted and sent to treasury.
-     * @param id           Smartfolio ERC1155 token ID to mint.
-     * @param nftAmount    Number of ERC1155 tokens to mint.
-     * @param maxSmfBurn   Slippage guard — reverts if SMF to burn exceeds this.
+     * @notice Burn SMF to mint 1 ERC1155 token of `id`.
+     *         The NFT floor price is $10 USD, converted to ETH via Chainlink oracle.
+     *         The ETH backing of the burned SMF flows into the NFT's reserve.
+     * @param id          Smartfolio ERC1155 token ID to mint.
+     * @param maxSmfBurn  Slippage guard — reverts if SMF to burn exceeds this.
      */
-    function mintNFT(uint256 id, uint256 nftAmount, uint256 maxSmfBurn) external nonReentrant {
+    function mintNFT(uint256 id, uint256 maxSmfBurn) external nonReentrant {
         if (smartfolio == address(0)) revert SmartfolioNotSet();
-        if (nftAmount == 0) revert AmountZero();
 
-        uint256 ethNeeded = ISmartfolio(smartfolio).mintCost(nftAmount);
-        uint256 conversionFee = (ethNeeded * conversionFeeBps) / 10_000;
-        uint256 totalEth = ethNeeded + conversionFee;
+        // $10 USD → ETH using Chainlink (8-decimal price feed)
+        // ethNeeded = ($10 * 1e18) / (ethPrice / 1e8) = (10e18 * 1e8) / ethPrice
+        uint256 ethPrice = _getEthPrice();
+        uint256 ethNeeded = (NFT_FLOOR_USD * 1e8) / ethPrice;
 
-        uint256 smfToBurn = _smfAmountForEth(totalEth);
+        uint256 smfToBurn = _smfAmountForEth(ethNeeded);
         if (smfToBurn > maxSmfBurn) revert SlippageExceeded();
         if (balanceOf(msg.sender) < smfToBurn) revert InsufficientSMFBalance();
 
         smfTotalSupply -= smfToBurn;
         _burn(msg.sender, smfToBurn);
 
-        if (conversionFee > 0 && treasury != address(0)) {
-            (bool feeOk, ) = treasury.call{value: conversionFee}("");
-            if (!feeOk) revert ETHTransferFailed();
-        }
+        ISmartfolio(smartfolio).mintFunded{value: ethNeeded}(msg.sender, id, 1);
 
-        ISmartfolio(smartfolio).mintFunded{value: ethNeeded}(msg.sender, id, nftAmount);
-
-        emit NFTMinted(msg.sender, id, nftAmount, smfToBurn, conversionFee);
+        emit NFTMinted(msg.sender, id, smfToBurn, ethNeeded);
     }
 
     // -------------------------------------------------------------------------
@@ -262,18 +272,20 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice Simulate the SMF cost to mint `nftAmount` ERC1155 tokens of `id`.
-     * @return smfRequired  Total SMF to burn (covers NFT cost + fee).
-     * @return feePaid      ETH value of the conversion fee.
+     * @notice Simulate the SMF cost to mint 1 ERC1155 token of `id`.
+     * @return smfRequired  SMF to burn.
+     * @return ethNeeded    ETH value locked into the NFT reserve ($10 USD floor).
      */
-    function smfForNFT(uint256 id, uint256 nftAmount)
+    function smfForNFT(uint256 id)
         external view
-        returns (uint256 smfRequired, uint256 feePaid)
+        returns (uint256 smfRequired, uint256 ethNeeded)
     {
+        // id param kept for ABI symmetry / future per-ID pricing
+        id;
         if (smartfolio == address(0)) revert SmartfolioNotSet();
-        uint256 ethNeeded = ISmartfolio(smartfolio).mintCost(nftAmount);
-        feePaid = (ethNeeded * conversionFeeBps) / 10_000;
-        smfRequired = _smfAmountForEth(ethNeeded + feePaid);
+        uint256 ethPrice = _getEthPrice();
+        ethNeeded = (NFT_FLOOR_USD * 1e8) / ethPrice;
+        smfRequired = _smfAmountForEth(ethNeeded);
     }
 
     /**
@@ -285,6 +297,23 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
 
     function getTiers() external view returns (TierConfig[] memory) {
         return _tiers;
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal — oracle
+    // -------------------------------------------------------------------------
+
+    /**
+     * @dev Read the latest ETH/USD price from Chainlink. Reverts if the feed is
+     *      not configured, the price is non-positive, or the round is stale.
+     * @return price  ETH/USD price with 8 decimals (e.g. 3000_00000000 = $3000).
+     */
+    function _getEthPrice() internal view returns (uint256 price) {
+        if (address(ethUsdFeed) == address(0)) revert FeedNotSet();
+        (, int256 answer, , uint256 updatedAt, ) = ethUsdFeed.latestRoundData();
+        if (answer <= 0) revert InvalidPrice();
+        if (block.timestamp - updatedAt > priceMaxAge) revert StalePrice();
+        price = uint256(answer);
     }
 
     // -------------------------------------------------------------------------

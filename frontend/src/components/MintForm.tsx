@@ -1,80 +1,85 @@
 import { useState } from 'react'
 import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi'
 import { formatEther } from 'viem'
-import { CONTRACT_ADDRESS, SMARTFOLIO_ABI } from '../contracts'
+import { SMF_ADDRESS, SMF_ABI } from '../contracts'
 
 interface Props {
   tokenId: number
 }
 
 export default function MintForm({ tokenId }: Props) {
-  const [amount, setAmount] = useState('')
-  const { address, isConnected } = useAccount()
+  const [slippagePct, setSlippagePct] = useState('1')
+  const { isConnected } = useAccount()
 
-  const parsedAmount = parseInt(amount) || 0
-  const isValidAmount = parsedAmount > 0
-
-  const { data: cost } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: SMARTFOLIO_ABI,
-    functionName: 'mintCost',
-    args: [BigInt(parsedAmount)],
-    query: {
-      enabled: isValidAmount,
-    },
+  const { data: smfSimulation } = useReadContract({
+    address: SMF_ADDRESS,
+    abi: SMF_ABI,
+    functionName: 'smfForNFT',
+    args: [BigInt(tokenId)],
+    query: { enabled: tokenId > 0 },
   })
+  const smfRequired = smfSimulation?.[0]
+  const ethNeeded = smfSimulation?.[1]
 
-  const { writeContract, data: txHash, isPending: isWritePending, error: writeError } = useWriteContract()
-
+  const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract()
   const { isLoading: isConfirming, isSuccess: isConfirmed } =
     useWaitForTransactionReceipt({ hash: txHash })
 
   function handleMint() {
-    if (!address || !isValidAmount || cost === undefined) return
+    if (smfRequired === undefined) return
+    const slippage = 1 + (parseFloat(slippagePct) || 1) / 100
+    const maxBurn = BigInt(Math.ceil(Number(smfRequired) * slippage))
     writeContract({
-      address: CONTRACT_ADDRESS,
-      abi: SMARTFOLIO_ABI,
-      functionName: 'mint',
-      args: [address, BigInt(tokenId), BigInt(parsedAmount), '0x'],
-      value: cost,
+      address: SMF_ADDRESS,
+      abi: SMF_ABI,
+      functionName: 'mintNFT',
+      args: [BigInt(tokenId), maxBurn],
     })
   }
 
-  const isDisabled =
-    !isConnected || !isValidAmount || cost === undefined || isWritePending || isConfirming
+  const isDisabled = !isConnected || smfRequired === undefined || isPending || isConfirming
 
   return (
     <div className="card space-y-4">
-      <h2 className="text-lg font-bold text-white">Mint Tokens</h2>
+      <h2 className="text-lg font-bold text-white">Mint Token</h2>
+      <p className="text-xs" style={{ color: 'rgba(212,175,55,0.5)' }}>
+        Mint 1 token into NFT #{tokenId}. Each mint costs a $10 USD floor in SMF.
+      </p>
 
       <div className="space-y-1">
-        <label className="stat-label">Amount</label>
-        <div className="relative flex items-center">
+        <label className="stat-label">Slippage tolerance</label>
+        <div className="relative flex items-center" style={{ maxWidth: '8rem' }}>
           <input
             type="number"
-            min={1}
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="0"
-            className="input-money pr-16"
+            min={0.1}
+            step={0.1}
+            value={slippagePct}
+            onChange={(e) => setSlippagePct(e.target.value)}
+            className="input-money pr-8"
           />
-          <span className="absolute right-3 text-sm pointer-events-none" style={{ color: 'rgba(212,175,55,0.5)' }}>
-            tokens
-          </span>
+          <span className="absolute right-3 text-sm pointer-events-none" style={{ color: 'rgba(212,175,55,0.5)' }}>%</span>
         </div>
       </div>
 
-      <div className="flex items-center justify-between box-info">
-        <span className="stat-label" style={{ marginBottom: 0 }}>Cost</span>
-        {cost !== undefined && isValidAmount ? (
-          <span className="font-semibold text-gold">{formatEther(cost)} ETH</span>
-        ) : (
-          <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>
-        )}
-      </div>
+      {smfRequired !== undefined && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between box-info">
+            <span className="stat-label" style={{ marginBottom: 0 }}>SMF to burn</span>
+            <span className="font-semibold text-gold">{smfRequired.toString()} SMF</span>
+          </div>
+          {ethNeeded !== undefined && (
+            <div className="flex items-center justify-between box-info">
+              <span className="stat-label" style={{ marginBottom: 0 }}>ETH locked in reserve</span>
+              <span className="font-semibold" style={{ color: 'rgba(255,255,255,0.7)' }}>
+                {formatEther(ethNeeded)} ETH
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       <button onClick={handleMint} disabled={isDisabled} className="btn-money">
-        {isWritePending ? 'Confirm in wallet…' : isConfirming ? 'Minting…' : 'Mint'}
+        {isPending ? 'Confirm in wallet…' : isConfirming ? 'Minting…' : 'Mint with SMF'}
       </button>
 
       {isConfirmed && (

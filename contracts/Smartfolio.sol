@@ -86,18 +86,6 @@ contract Smartfolio is
     // Mutating entry points — guarded here, logic in facets
     // -------------------------------------------------------------------------
 
-    function mint(address account, uint256 id, uint256 amount, bytes memory data)
-        public payable nonReentrant whenNotPaused
-    {
-        _delegateTo(treasuryFacet);
-    }
-
-    function mintBatch(address to, uint256[] memory ids, uint256[] memory amounts, bytes memory data)
-        public payable nonReentrant whenNotPaused
-    {
-        _delegateTo(treasuryFacet);
-    }
-
     function burn(uint256 id, uint256 amount)
         external nonReentrant whenNotPaused
     {

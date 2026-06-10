@@ -1,6 +1,8 @@
 const SmartfolioERC20 = artifacts.require("SmartfolioERC20");
 
 const PROXY = "0xA24A683d4fE9C8A0a5DC96d175c419ABf70e8206";
+// Chainlink ETH/USD feed on Sepolia
+const ETH_USD_FEED = "0x694AA1769357215DE4FAC081bf1f309aDC325306";
 
 const TIERS = [
   { threshold: 100,   pricePerToken: web3.utils.toWei("0.001", "ether") },
@@ -19,6 +21,9 @@ module.exports = async function (callback) {
 
     await smf.setTiers(TIERS, { from: owner });
     console.log("✓ Tiers set");
+
+    await smf.setEthUsdFeed(ETH_USD_FEED, { from: owner });
+    console.log("✓ ETH/USD feed set:", ETH_USD_FEED);
 
     // Wire SMF contract into Smartfolio proxy
     const Smartfolio = artifacts.require("Smartfolio");

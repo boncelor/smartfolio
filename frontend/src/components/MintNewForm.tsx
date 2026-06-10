@@ -1,75 +1,44 @@
 import { useState } from 'react'
 import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi'
 import { formatEther } from 'viem'
-import { CONTRACT_ADDRESS, SMARTFOLIO_ABI, SMF_ADDRESS, SMF_ABI } from '../contracts'
-
-type PayWith = 'eth' | 'smf'
+import { SMF_ADDRESS, SMF_ABI } from '../contracts'
 
 export default function MintNewForm() {
   const [open, setOpen] = useState(false)
   const [tokenId, setTokenId] = useState('')
-  const [amount, setAmount] = useState('')
-  const [payWith, setPayWith] = useState<PayWith>('eth')
   const [slippagePct, setSlippagePct] = useState('1')
-  const { address, isConnected } = useAccount()
+  const { isConnected } = useAccount()
 
   const parsedId = parseInt(tokenId) || 0
-  const parsedAmount = parseInt(amount) || 0
-  const isValid = parsedId > 0 && parsedAmount > 0
+  const isValid = parsedId > 0
 
-  // ETH path
-  const { data: ethCost } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: SMARTFOLIO_ABI,
-    functionName: 'mintCost',
-    args: [BigInt(parsedAmount)],
-    query: { enabled: isValid },
-  })
-
-  // SMF path
   const { data: smfSimulation } = useReadContract({
     address: SMF_ADDRESS,
     abi: SMF_ABI,
     functionName: 'smfForNFT',
-    args: [BigInt(parsedId), BigInt(parsedAmount)],
-    query: { enabled: isValid && payWith === 'smf' },
+    args: [BigInt(parsedId)],
+    query: { enabled: isValid },
   })
   const smfRequired = smfSimulation?.[0]
-  const smfFee = smfSimulation?.[1]
+  const ethNeeded = smfSimulation?.[1]
 
   const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract()
   const { isLoading: isConfirming, isSuccess: isConfirmed } =
     useWaitForTransactionReceipt({ hash: txHash })
 
   function handleMint() {
-    if (!address || !isValid) return
-
-    if (payWith === 'eth' && ethCost !== undefined) {
-      writeContract({
-        address: CONTRACT_ADDRESS,
-        abi: SMARTFOLIO_ABI,
-        functionName: 'mint',
-        args: [address, BigInt(parsedId), BigInt(parsedAmount), '0x'],
-        value: ethCost,
-      })
-    }
-
-    if (payWith === 'smf' && smfRequired !== undefined) {
-      const slippage = 1 + (parseFloat(slippagePct) || 1) / 100
-      const maxBurn = BigInt(Math.ceil(Number(smfRequired) * slippage))
-      writeContract({
-        address: SMF_ADDRESS,
-        abi: SMF_ABI,
-        functionName: 'mintNFT',
-        args: [BigInt(parsedId), BigInt(parsedAmount), maxBurn],
-      })
-    }
+    if (!isValid || smfRequired === undefined) return
+    const slippage = 1 + (parseFloat(slippagePct) || 1) / 100
+    const maxBurn = BigInt(Math.ceil(Number(smfRequired) * slippage))
+    writeContract({
+      address: SMF_ADDRESS,
+      abi: SMF_ABI,
+      functionName: 'mintNFT',
+      args: [BigInt(parsedId), maxBurn],
+    })
   }
 
-  const isDisabled = !isConnected || !isValid || isPending || isConfirming || (
-    payWith === 'eth' ? ethCost === undefined :
-    smfRequired === undefined
-  )
+  const isDisabled = !isConnected || !isValid || smfRequired === undefined || isPending || isConfirming
 
   return (
     <div className="card space-y-4">
@@ -99,21 +68,6 @@ export default function MintNewForm() {
 
       {open && (
         <>
-          {/* Pay with toggle */}
-          <div className="flex gap-2">
-            {(['eth', 'smf'] as PayWith[]).map((p) => (
-              <button
-                key={p}
-                onClick={() => setPayWith(p)}
-                className={`px-4 py-2 text-sm font-semibold rounded transition-colors ${
-                  payWith === p ? 'tab-active-gold-pill' : 'tab-inactive'
-                }`}
-              >
-                Pay with {p.toUpperCase()}
-              </button>
-            ))}
-          </div>
-
           <div className="space-y-1">
             <label className="stat-label">Token ID</label>
             <input
@@ -128,68 +82,39 @@ export default function MintNewForm() {
           </div>
 
           <div className="space-y-1">
-            <label className="stat-label">Amount</label>
-            <div className="relative flex items-center">
+            <label className="stat-label">Slippage tolerance</label>
+            <div className="relative flex items-center" style={{ maxWidth: '8rem' }}>
               <input
                 type="number"
-                min={1}
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0"
-                className="input-money pr-16"
+                min={0.1}
+                step={0.1}
+                value={slippagePct}
+                onChange={(e) => setSlippagePct(e.target.value)}
+                className="input-money pr-8"
               />
-              <span className="absolute right-3 text-sm pointer-events-none" style={{ color: 'rgba(212,175,55,0.5)' }}>
-                tokens
-              </span>
+              <span className="absolute right-3 text-sm pointer-events-none" style={{ color: 'rgba(212,175,55,0.5)' }}>%</span>
             </div>
           </div>
 
-          {/* Slippage for SMF path */}
-          {payWith === 'smf' && (
-            <div className="space-y-1">
-              <label className="stat-label">Slippage tolerance</label>
-              <div className="relative flex items-center" style={{ maxWidth: '8rem' }}>
-                <input
-                  type="number"
-                  min={0.1}
-                  step={0.1}
-                  value={slippagePct}
-                  onChange={(e) => setSlippagePct(e.target.value)}
-                  className="input-money pr-8"
-                />
-                <span className="absolute right-3 text-sm pointer-events-none" style={{ color: 'rgba(212,175,55,0.5)' }}>%</span>
+          {smfRequired !== undefined && isValid && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between box-info">
+                <span className="stat-label" style={{ marginBottom: 0 }}>SMF to burn</span>
+                <span className="font-semibold text-gold">{smfRequired.toString()} SMF</span>
               </div>
+              {ethNeeded !== undefined && (
+                <div className="flex items-center justify-between box-info">
+                  <span className="stat-label" style={{ marginBottom: 0 }}>ETH locked in reserve</span>
+                  <span className="font-semibold" style={{ color: 'rgba(255,255,255,0.7)' }}>
+                    {formatEther(ethNeeded)} ETH
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Cost preview */}
-          <div className="space-y-2">
-            {payWith === 'eth' && (
-              <div className="flex items-center justify-between box-info">
-                <span className="stat-label" style={{ marginBottom: 0 }}>Cost</span>
-                <span className="font-semibold text-gold">
-                  {ethCost !== undefined && isValid ? formatEther(ethCost) + ' ETH' : '—'}
-                </span>
-              </div>
-            )}
-            {payWith === 'smf' && smfRequired !== undefined && isValid && (
-              <>
-                <div className="flex items-center justify-between box-info">
-                  <span className="stat-label" style={{ marginBottom: 0 }}>SMF to burn</span>
-                  <span className="font-semibold text-gold">{smfRequired.toString()} SMF</span>
-                </div>
-                <div className="flex items-center justify-between box-info">
-                  <span className="stat-label" style={{ marginBottom: 0 }}>Conversion fee</span>
-                  <span className="font-semibold" style={{ color: '#f87171' }}>
-                    {smfFee !== undefined ? formatEther(smfFee) + ' ETH' : '—'}
-                  </span>
-                </div>
-              </>
-            )}
-          </div>
-
           <button onClick={handleMint} disabled={isDisabled} className="btn-money">
-            {isPending ? 'Confirm in wallet…' : isConfirming ? 'Minting…' : 'Mint'}
+            {isPending ? 'Confirm in wallet…' : isConfirming ? 'Minting…' : 'Mint with SMF'}
           </button>
 
           {isConfirmed && (

@@ -39,13 +39,6 @@ export const SMF_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
   {
-    name: 'conversionFeeBps',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-  {
     name: 'balanceOf',
     type: 'function',
     stateMutability: 'view',
@@ -65,11 +58,10 @@ export const SMF_ABI = [
     stateMutability: 'view',
     inputs: [
       { name: 'id', type: 'uint256' },
-      { name: 'nftAmount', type: 'uint256' },
     ],
     outputs: [
       { name: 'smfRequired', type: 'uint256' },
-      { name: 'feePaid', type: 'uint256' },
+      { name: 'ethNeeded', type: 'uint256' },
     ],
   },
   {
@@ -92,7 +84,6 @@ export const SMF_ABI = [
     stateMutability: 'nonpayable',
     inputs: [
       { name: 'id', type: 'uint256' },
-      { name: 'nftAmount', type: 'uint256' },
       { name: 'maxSmfBurn', type: 'uint256' },
     ],
     outputs: [],
@@ -164,9 +155,7 @@ export const SMARTFOLIO_ABI = [
     name: 'mintCost',
     type: 'function',
     stateMutability: 'view',
-    inputs: [
-      { name: 'amount', type: 'uint256' },
-    ],
+    inputs: [{ name: 'amount', type: 'uint256' }],
     outputs: [{ name: '', type: 'uint256' }],
   },
   {
@@ -353,18 +342,6 @@ export const SMARTFOLIO_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
   // Write functions
-  {
-    name: 'mint',
-    type: 'function',
-    stateMutability: 'payable',
-    inputs: [
-      { name: 'account', type: 'address' },
-      { name: 'id', type: 'uint256' },
-      { name: 'amount', type: 'uint256' },
-      { name: 'data', type: 'bytes' },
-    ],
-    outputs: [],
-  },
   {
     name: 'burn',
     type: 'function',
