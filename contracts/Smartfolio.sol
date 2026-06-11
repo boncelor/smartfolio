@@ -301,6 +301,7 @@ contract Smartfolio is
         if (lpActive[id]) revert LiquidityAlreadyActive();
         if (isLeverageToken[id]) revert IncompatibleTokenType();
         uint256 totalWeight;
+        uint256 smfCount;
         for (uint256 i = 0; i < assets.length; i++) {
             if (assets[i].weightBps == 0) revert ZeroWeight();
             totalWeight += assets[i].weightBps;
@@ -316,10 +317,30 @@ contract Smartfolio is
                 if (assets[i].swapFee != 500 && assets[i].swapFee != 3000 && assets[i].swapFee != 10000)
                     revert InvalidPoolFee();
                 if (assets[i].tickLower >= assets[i].tickUpper) revert NoLPConfig();
+            } else if (t == AssetType.SMF) {
+                if (smfContract == address(0)) revert SMFContractNotSet();
+                if (assets[i].token != smfContract) revert ZeroAddress();
+                smfCount++;
+                if (smfCount > 1) revert NoAssetsProvided(); // only one SMF slice allowed
+            } else if (t == AssetType.STAKING) {
+                revert StakingNotSupported();
             }
             // AAVE: no additional fields to validate here (pool set globally via setDefaultAavePool)
         }
         if (totalWeight != 10_000) revert WeightsMustSum10000();
+
+        // Compute total SMF weight and enforce minimum + tier gates
+        uint256 smfBps;
+        for (uint256 i = 0; i < assets.length; i++) {
+            if (assets[i].assetType == AssetType.SMF) smfBps += assets[i].weightBps;
+        }
+        if (smfBps < SMF_BASE_TIER_BPS) revert SMFMinWeightNotMet();
+        for (uint256 i = 0; i < assets.length; i++) {
+            AssetType t = assets[i].assetType;
+            if (t == AssetType.LP   && smfBps < SMF_LP_TIER_BPS)       revert TierRequiresMoreSMF();
+            if (t == AssetType.AAVE && smfBps < SMF_LEVERAGE_TIER_BPS) revert TierRequiresMoreSMF();
+        }
+
         _setPortfolioConfigStorage(id, assets);
         emit PortfolioConfigSet(id, assets);
     }
@@ -476,6 +497,19 @@ contract Smartfolio is
 
     function getPortfolioConfig(uint256 id) external view returns (PortfolioAsset[] memory) {
         return _getPortfolioConfig(id);
+    }
+
+    /**
+     * @notice Returns the SMF allocation and feature tier for a portfolio token ID.
+     * @return smfWeightBps  Total SMF weight in basis points (0 if no SMF asset configured).
+     * @return tier          0 = none, 1 = base (≥20%), 2 = LP (≥40%), 3 = leverage (≥60%).
+     */
+    function getPortfolioTierInfo(uint256 id) external view returns (uint256 smfWeightBps, uint8 tier) {
+        smfWeightBps = _smfWeightBps(_getPortfolioConfig(id));
+        if      (smfWeightBps >= SMF_LEVERAGE_TIER_BPS) tier = 3;
+        else if (smfWeightBps >= SMF_LP_TIER_BPS)       tier = 2;
+        else if (smfWeightBps >= SMF_BASE_TIER_BPS)     tier = 1;
+        else                                            tier = 0;
     }
 
     /**

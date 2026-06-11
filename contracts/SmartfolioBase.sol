@@ -105,6 +105,10 @@ abstract contract SmartfolioBase {
     error SupplyNotZero();
     error NoDust();
     error LeverageIdConflict();
+    error SMFMinWeightNotMet();
+    error TierRequiresMoreSMF();
+    error StakingNotSupported();
+    error SMFContractNotSet();
 
     // -------------------------------------------------------------------------
     // Events
@@ -156,7 +160,7 @@ abstract contract SmartfolioBase {
     // Types
     // -------------------------------------------------------------------------
 
-    enum AssetType { ERC20, AAVE, LP }
+    enum AssetType { ERC20, AAVE, LP, SMF, STAKING }
 
     struct TierConfig {
         uint128 threshold;
@@ -246,6 +250,11 @@ abstract contract SmartfolioBase {
 
     uint256 internal constant WAD = 1e18;
     uint256 internal constant MAX_BURN_FEE_CAP = 0.8e18;
+
+    /// @dev Minimum SMF allocation (in bps) required for each feature tier.
+    uint16 internal constant SMF_BASE_TIER_BPS     = 2000; // 20% — base: ETH, SMF, ERC20
+    uint16 internal constant SMF_LP_TIER_BPS       = 4000; // 40% — unlocks LP positions
+    uint16 internal constant SMF_LEVERAGE_TIER_BPS = 6000; // 60% — unlocks leverage (Aave) positions
 
     // -------------------------------------------------------------------------
     // Storage gap — slot 0
@@ -387,6 +396,15 @@ abstract contract SmartfolioBase {
     bool    public hasActiveLeverageId;
 
     // -------------------------------------------------------------------------
+    // State — SMF portfolio holdings
+    // -------------------------------------------------------------------------
+
+    /// @dev Amount of SMF tokens held as a portfolio asset for each token ID.
+    ///      Tracked separately from portfolioHoldings because SMF is bought/sold
+    ///      via the bonding curve, not Uniswap.
+    mapping(uint256 => uint256) public portfolioSMFHoldings;
+
+    // -------------------------------------------------------------------------
     // Modifiers
     // -------------------------------------------------------------------------
 
@@ -424,6 +442,15 @@ abstract contract SmartfolioBase {
     // -------------------------------------------------------------------------
     // Internal view helpers (used by Smartfolio views and facets)
     // -------------------------------------------------------------------------
+
+    /// @dev Sum the weightBps of all SMF-type assets in a portfolio config.
+    function _smfWeightBps(PortfolioAsset[] storage assets) internal view returns (uint256 smfBps) {
+        for (uint256 i = 0; i < assets.length; i++) {
+            if (assets[i].assetType == AssetType.SMF) {
+                smfBps += assets[i].weightBps;
+            }
+        }
+    }
 
     /// @dev Read a Chainlink feed and return the price, or 0 if the answer is
     ///      invalid, negative, or older than priceMaxAge (default 1 hour).

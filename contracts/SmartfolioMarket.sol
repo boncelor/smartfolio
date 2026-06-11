@@ -111,6 +111,12 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
                 IPortfolioAavePool(defaultAavePool).supply(address(weth), amountIn, address(this), 0);
                 portfolioAaveWeth[id] += amountIn;
                 emit PortfolioAaveDeployed(id, amountIn);
+            } else if (asset.assetType == AssetType.SMF) {
+                // Phase 3: unwrap WETH → ETH, buy SMF via bonding curve.
+                // Implemented in Phase 3. For now, unwrap and hold as raw ETH
+                // in the proxy (portfolioSMFHoldings tracks the pending ETH).
+                weth.withdraw(amountIn);
+                portfolioSMFHoldings[id] += amountIn;
             } else {
                 // LP
                 if (positionManager == address(0)) revert NoPosManagerSet();
@@ -234,6 +240,7 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
         _burn(msg.sender, id, amount);
 
         uint256 wethReceived;
+        uint256 ethFromSMF;
 
         for (uint256 i = 0; i < assets.length; i++) {
             PortfolioAsset storage asset = assets[i];
@@ -257,6 +264,15 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
                 wethReceived += withdrawn;
                 emit PortfolioAaveDivested(id, withdrawn);
 
+            } else if (asset.assetType == AssetType.SMF) {
+                // Phase 3: sell SMF via bonding curve and receive ETH.
+                // For now, return the pro-rata share of held ETH directly.
+                if (portfolioSMFHoldings[id] == 0) continue;
+                uint256 smfEth = (portfolioSMFHoldings[id] * amount) / supply;
+                if (smfEth == 0) continue;
+                portfolioSMFHoldings[id] -= smfEth;
+                ethFromSMF += smfEth;
+
             } else {
                 // LP
                 if (portfolioLpLiquidity[id] == 0) continue;
@@ -267,7 +283,7 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
 
         if (wethReceived > 0) weth.withdraw(wethReceived);
 
-        uint256 totalEth = wethReceived + ethFromReserve;
+        uint256 totalEth = wethReceived + ethFromReserve + ethFromSMF;
         if (totalEth < minEthOut) revert InsufficientETHOut();
 
         emit Divested(msg.sender, id, amount, totalEth);

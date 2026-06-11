@@ -307,7 +307,10 @@ contract("SmartfolioToken + SmartfolioTokenFactory", (accounts) => {
       await sf.setTiers(TIERS,  { from: owner });
       await sf.setPortfolioConfig(
         PORT_ID,
-        [{ assetType: 0, token: tokenA.address, weightBps: 10000, poolFee: 3000, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" }],
+        [
+          { assetType: 3, token: owner,          weightBps: 2000, poolFee: 0,    swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+          { assetType: 0, token: tokenA.address, weightBps: 8000, poolFee: 3000, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+        ],
         { from: owner }
       );
 

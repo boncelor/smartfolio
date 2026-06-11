@@ -43,6 +43,7 @@ const TICK_HIGH =  887220;
 const ERC20_TYPE = 0;
 const AAVE_TYPE  = 1;
 const LP_TYPE    = 2;
+const SMF_TYPE   = 3;
 
 async function expectRevert(promise) {
   try {
@@ -103,18 +104,20 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
   // -------------------------------------------------------------------------
 
   describe("setPortfolioConfig — mixed types", () => {
-    it("accepts a valid ERC20+AAVE+LP config", async () => {
+    it("accepts a valid SMF+ERC20+AAVE+LP config (60% SMF unlocks both tiers)", async () => {
       await sf.setPortfolioConfig(TOKEN_ID, [
-        { assetType: ERC20_TYPE, token: tokenA.address, weightBps: 4000, poolFee: POOL_FEE, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
-        { assetType: AAVE_TYPE,  token: "0x0000000000000000000000000000000000000000", weightBps: 3000, poolFee: 0, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
-        { assetType: LP_TYPE,    token: tokenB.address, weightBps: 3000, poolFee: POOL_FEE, swapFee: SWAP_FEE, tickLower: TICK_LOW, tickUpper: TICK_HIGH, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: SMF_TYPE,   token: owner,          weightBps: 6000, poolFee: 0, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: ERC20_TYPE, token: tokenA.address, weightBps: 1000, poolFee: POOL_FEE, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: AAVE_TYPE,  token: "0x0000000000000000000000000000000000000000", weightBps: 1500, poolFee: 0, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: LP_TYPE,    token: tokenB.address, weightBps: 1500, poolFee: POOL_FEE, swapFee: SWAP_FEE, tickLower: TICK_LOW, tickUpper: TICK_HIGH, swapPath: "0x", sellSwapPath: "0x" },
       ], { from: owner });
 
       const config = await sf.getPortfolioConfig(TOKEN_ID);
-      assert.equal(config.length, 3);
-      assert.equal(config[0].assetType.toString(), String(ERC20_TYPE));
-      assert.equal(config[1].assetType.toString(), String(AAVE_TYPE));
-      assert.equal(config[2].assetType.toString(), String(LP_TYPE));
+      assert.equal(config.length, 4);
+      assert.equal(config[0].assetType.toString(), String(SMF_TYPE));
+      assert.equal(config[1].assetType.toString(), String(ERC20_TYPE));
+      assert.equal(config[2].assetType.toString(), String(AAVE_TYPE));
+      assert.equal(config[3].assetType.toString(), String(LP_TYPE));
     });
 
     it("reverts LP slot with invalid poolFee", async () => {
@@ -149,7 +152,8 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
   describe("ERC20-only portfolio (regression)", () => {
     beforeEach(async () => {
       await sf.setPortfolioConfig(TOKEN_ID, [
-        { assetType: ERC20_TYPE, token: tokenA.address, weightBps: 6000, poolFee: POOL_FEE, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: SMF_TYPE,   token: owner,          weightBps: 2000, poolFee: 0,        swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: ERC20_TYPE, token: tokenA.address, weightBps: 4000, poolFee: POOL_FEE, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
         { assetType: ERC20_TYPE, token: tokenB.address, weightBps: 4000, poolFee: POOL_FEE, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
       ], { from: owner });
       const cost = await sf.mintCost(10);
@@ -177,8 +181,10 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
 
   describe("AAVE-only portfolio", () => {
     beforeEach(async () => {
+      // AAVE requires ≥60% SMF
       await sf.setPortfolioConfig(TOKEN_ID, [
-        { assetType: AAVE_TYPE, token: "0x0000000000000000000000000000000000000000", weightBps: 10000, poolFee: 0, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: SMF_TYPE,  token: owner, weightBps: 6000, poolFee: 0, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: AAVE_TYPE, token: "0x0000000000000000000000000000000000000000", weightBps: 4000, poolFee: 0, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
       ], { from: owner });
       const cost = await sf.mintCost(10);
       await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
@@ -189,11 +195,13 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
       await sf.deploy(TOKEN_ID, [], 0, 0, 0, { from: keeper });
 
       assert.equal(await sf.portfolioActive(TOKEN_ID), true);
+      // AAVE slice is 40% of reserve (60% held in SMF stub)
+      const expectedAave = new BN(reserve).muln(4000).divn(10000);
       const aaveWeth = await sf.portfolioAaveWeth(TOKEN_ID);
-      assert.equal(aaveWeth.toString(), reserve.toString(), "portfolioAaveWeth should equal deployed reserve");
+      assert.equal(aaveWeth.toString(), expectedAave.toString(), "portfolioAaveWeth should equal 40% of deployed reserve");
 
       const aaveSupplied = await aave.totalSupplied();
-      assert.equal(aaveSupplied.toString(), reserve.toString(), "MockAavePool should have received WETH");
+      assert.equal(aaveSupplied.toString(), expectedAave.toString(), "MockAavePool should have received 40% WETH");
     });
 
     it("emits PortfolioAaveDeployed", async () => {
@@ -234,8 +242,10 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
 
   describe("LP-only portfolio", () => {
     beforeEach(async () => {
+      // LP requires ≥40% SMF
       await sf.setPortfolioConfig(TOKEN_ID, [
-        { assetType: LP_TYPE, token: tokenB.address, weightBps: 10000, poolFee: POOL_FEE, swapFee: SWAP_FEE, tickLower: TICK_LOW, tickUpper: TICK_HIGH, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: SMF_TYPE, token: owner,          weightBps: 4000, poolFee: 0,        swapFee: 0,        tickLower: 0,        tickUpper: 0,         swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: LP_TYPE,  token: tokenB.address, weightBps: 6000, poolFee: POOL_FEE, swapFee: SWAP_FEE, tickLower: TICK_LOW, tickUpper: TICK_HIGH, swapPath: "0x", sellSwapPath: "0x" },
       ], { from: owner });
       const cost = await sf.mintCost(10);
       await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
@@ -281,36 +291,37 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
   // -------------------------------------------------------------------------
 
   describe("ERC20 + AAVE + LP mixed portfolio", () => {
-    // 40% ERC20 (tokenA), 30% AAVE, 30% LP (tokenB)
-    const mixedConfig = (addrA, addrB) => [
-      { assetType: ERC20_TYPE, token: addrA, weightBps: 4000, poolFee: POOL_FEE, swapFee: 0,        tickLower: 0,        tickUpper: 0,         swapPath: "0x", sellSwapPath: "0x" },
-      { assetType: AAVE_TYPE,  token: "0x0000000000000000000000000000000000000000", weightBps: 3000, poolFee: 0,        swapFee: 0,        tickLower: 0,        tickUpper: 0,         swapPath: "0x", sellSwapPath: "0x" },
-      { assetType: LP_TYPE,    token: addrB, weightBps: 3000, poolFee: POOL_FEE, swapFee: SWAP_FEE, tickLower: TICK_LOW, tickUpper: TICK_HIGH, swapPath: "0x", sellSwapPath: "0x" },
+    // 60% SMF (unlocks both AAVE and LP tiers), 10% ERC20 (tokenA), 15% AAVE, 15% LP (tokenB)
+    const mixedConfig = (addrA, addrB, smfAddr) => [
+      { assetType: SMF_TYPE,   token: smfAddr, weightBps: 6000, poolFee: 0,        swapFee: 0,        tickLower: 0,        tickUpper: 0,         swapPath: "0x", sellSwapPath: "0x" },
+      { assetType: ERC20_TYPE, token: addrA,   weightBps: 1000, poolFee: POOL_FEE, swapFee: 0,        tickLower: 0,        tickUpper: 0,         swapPath: "0x", sellSwapPath: "0x" },
+      { assetType: AAVE_TYPE,  token: "0x0000000000000000000000000000000000000000", weightBps: 1500, poolFee: 0, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+      { assetType: LP_TYPE,    token: addrB,   weightBps: 1500, poolFee: POOL_FEE, swapFee: SWAP_FEE, tickLower: TICK_LOW, tickUpper: TICK_HIGH, swapPath: "0x", sellSwapPath: "0x" },
     ];
 
     beforeEach(async () => {
-      await sf.setPortfolioConfig(TOKEN_ID, mixedConfig(tokenA.address, tokenB.address), { from: owner });
+      await sf.setPortfolioConfig(TOKEN_ID, mixedConfig(tokenA.address, tokenB.address, owner), { from: owner });
       const cost = await sf.mintCost(10);
       await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
     });
 
-    it("deploy correctly splits ETH across all three types", async () => {
+    it("deploy correctly splits ETH across ERC20, AAVE and LP types", async () => {
       const reserveBefore = new BN(await sf.reserve(TOKEN_ID));
       await sf.deploy(TOKEN_ID, [0], 0, 0, 0, { from: keeper });
 
       assert.equal(await sf.portfolioActive(TOKEN_ID), true);
 
-      // ERC20 slice: 40% went to tokenA
-      const expectedErc20 = reserveBefore.muln(4000).divn(10000);
+      // ERC20 slice: 10% went to tokenA
+      const expectedErc20 = reserveBefore.muln(1000).divn(10000);
       const holdingA = new BN(await sf.portfolioHoldings(TOKEN_ID, tokenA.address));
-      assert.equal(holdingA.toString(), expectedErc20.toString(), "ERC20 slice should be 40%");
+      assert.equal(holdingA.toString(), expectedErc20.toString(), "ERC20 slice should be 10%");
 
-      // AAVE slice: 30% went to Aave
-      const expectedAave = reserveBefore.muln(3000).divn(10000);
+      // AAVE slice: 15% went to Aave
+      const expectedAave = reserveBefore.muln(1500).divn(10000);
       const aaveWeth = new BN(await sf.portfolioAaveWeth(TOKEN_ID));
-      assert.equal(aaveWeth.toString(), expectedAave.toString(), "AAVE slice should be 30%");
+      assert.equal(aaveWeth.toString(), expectedAave.toString(), "AAVE slice should be 15%");
 
-      // LP slice: 30% went to LP position
+      // LP slice: 15% went to LP position
       const lpInfo = await sf.getPortfolioLPInfo(TOKEN_ID);
       assert.ok(new BN(lpInfo.liquidity).gt(new BN(0)), "LP slice should have liquidity");
     });
