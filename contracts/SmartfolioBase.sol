@@ -99,6 +99,12 @@ abstract contract SmartfolioBase {
     error CallerNotSMFContract();
     error SMFTiersNotConfigured();
     error InsufficientSMF();
+    error TierLimitExceeded();
+    error AssetLimitExceeded();
+    error ZeroSwapOutput();
+    error SupplyNotZero();
+    error NoDust();
+    error LeverageIdConflict();
 
     // -------------------------------------------------------------------------
     // Events
@@ -143,6 +149,8 @@ abstract contract SmartfolioBase {
     event SMFContractSet(address smfContract);
     event MintFunded(address indexed account, uint256 indexed id, uint256 amount, uint256 ethReceived);
     event ReserveAdded(uint256 indexed id, uint256 ethAdded);
+    event FeeSent(address indexed treasury, uint256 amount);
+    event DustSwept(uint256 indexed id, address indexed recipient, uint256 amount);
 
     // -------------------------------------------------------------------------
     // Types
@@ -240,18 +248,39 @@ abstract contract SmartfolioBase {
     uint256 internal constant MAX_BURN_FEE_CAP = 0.8e18;
 
     // -------------------------------------------------------------------------
-    // Reentrancy guard
+    // Storage gap — slot 0
     // -------------------------------------------------------------------------
 
-    uint256 internal _reentrancyStatus;
-    uint256 internal constant _NOT_ENTERED = 1;
-    uint256 internal constant _ENTERED = 2;
+    /// @dev Previously `_reentrancyStatus` for a custom slot-0 reentrancy guard.
+    ///      Kept as a private gap to preserve the storage layout. Must never be
+    ///      reused or removed.
+    uint256 private __reentrancyGuardGap;
+
+    // -------------------------------------------------------------------------
+    // Reentrancy guard (EIP-7201 namespaced — same slot as OZ ReentrancyGuard)
+    // -------------------------------------------------------------------------
+
+    // keccak256(abi.encode(uint256(keccak256("openzeppelin.storage.ReentrancyGuard")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant _REENTRANCY_GUARD_SLOT =
+        0x9b779b17422d0df92223018b32b4d1fa46e071723d6817e2486d003becc55f00;
+
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED     = 2;
 
     modifier nonReentrant() {
-        if (_reentrancyStatus == _ENTERED) revert ReentrantCall();
-        _reentrancyStatus = _ENTERED;
+        bytes32 _slot = _REENTRANCY_GUARD_SLOT;
+        uint256 _status;
+        assembly { _status := sload(_slot) }
+        if (_status == _ENTERED) revert ReentrantCall();
+        assembly { sstore(_slot, _ENTERED) }
         _;
-        _reentrancyStatus = _NOT_ENTERED;
+        assembly { sstore(_slot, _NOT_ENTERED) }
+    }
+
+    /// @dev Returns the EIP-7201 storage slot for the reentrancy guard.
+    ///      Used by Smartfolio._delegateTo to reset the guard after assembly return.
+    function _reentrancyGuardStorageSlot() internal pure returns (bytes32) {
+        return _REENTRANCY_GUARD_SLOT;
     }
 
     // -------------------------------------------------------------------------
@@ -348,6 +377,16 @@ abstract contract SmartfolioBase {
     uint256 public nextTokenId;
 
     // -------------------------------------------------------------------------
+    // State — C-2 single active leverage ID guard
+    // -------------------------------------------------------------------------
+
+    /// @dev C-2: only one leverage token ID may have an active position at a time.
+    ///      This prevents a second ID from exploiting the shared Aave account's
+    ///      aggregate health factor to bypass per-ID LTV caps.
+    uint256 public activeLeverageId;
+    bool    public hasActiveLeverageId;
+
+    // -------------------------------------------------------------------------
     // Modifiers
     // -------------------------------------------------------------------------
 
@@ -385,6 +424,23 @@ abstract contract SmartfolioBase {
     // -------------------------------------------------------------------------
     // Internal view helpers (used by Smartfolio views and facets)
     // -------------------------------------------------------------------------
+
+    /// @dev Read a Chainlink feed and return the price, or 0 if the answer is
+    ///      invalid, negative, or older than priceMaxAge (default 1 hour).
+    ///      Never reverts — callers treat a 0 return as "price unavailable".
+    function _safeChainlinkPrice(address feed) internal view returns (uint256) {
+        if (feed == address(0)) return 0;
+        uint256 maxAge = priceMaxAge > 0 ? priceMaxAge : 3600;
+        try AggregatorV3Interface(feed).latestRoundData() returns (
+            uint80, int256 answer, uint256, uint256 updatedAt, uint80
+        ) {
+            if (answer <= 0) return 0;
+            if (block.timestamp - updatedAt > maxAge) return 0;
+            return uint256(answer);
+        } catch {
+            return 0;
+        }
+    }
 
     function _mintCost(uint256 amount) internal view returns (uint256 cost) {
         TierConfig[] storage tiers = _tiers;

@@ -20,6 +20,8 @@ contract MockV3Aggregator {
         _updatedAt = updatedAt;
     }
 
+    function decimals() external pure returns (uint8) { return 8; }
+
     function latestRoundData()
         external view
         returns (uint80, int256 answer, uint256, uint256 updatedAt, uint80)

@@ -206,6 +206,7 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
                 uint256 amountOut = _swapWETHForToken(
                     inst.token, inst.amountIn, inst.amountOutMin, inst.poolFee, inst.swapPath
                 );
+                if (amountOut == 0) revert ZeroSwapOutput();
                 portfolioHoldings[id][inst.token] += amountOut;
             }
         }

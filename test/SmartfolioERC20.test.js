@@ -56,7 +56,9 @@ contract("SmartfolioERC20", (accounts) => {
       [owner, treasury.address, market.address, creditMarket.address],
       { kind: "uups" }
     );
+    await sf.pause({ from: owner });
     await sf.setLiquidityMarketFacet(liqMarket.address, { from: owner });
+    await sf.unpause({ from: owner });
     await sf.setTiers(NFT_TIERS, { from: owner });
 
     // Mock Chainlink feed: ETH = $3 000

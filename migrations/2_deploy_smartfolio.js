@@ -25,8 +25,10 @@ module.exports = async function (deployer, network, accounts) {
     { deployer, kind: "uups" }
   );
 
-  // Wire up the liquidity market facet post-deploy
+  // Wire up the liquidity market facet post-deploy (requires pause)
+  await proxy.pause();
   await proxy.setLiquidityMarketFacet(liquidityMarket.address);
+  await proxy.unpause();
 
   // Deploy the ERC20 wrapper factory
   const tokenFactory = await deployer.deploy(SmartfolioTokenFactory, proxy.address, initialOwner);

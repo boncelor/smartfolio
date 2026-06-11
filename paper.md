@@ -103,7 +103,25 @@ Using `globalTotalSupply` rather than the per-ID supply means a burn that is sma
 
 If a treasury address is configured, the fee ETH is forwarded there. Otherwise it remains in `reserve[id]`, increasing the backing per token for remaining holders.
 
-### 3.4 Burn Restrictions
+### 3.4 Rounding Dust
+
+Integer division in the pro-rata formula accumulates sub-wei residuals across many partial burns:
+
+```
+gross = (amount × reserve[id]) / totalSupply[id]
+```
+
+Each division rounds down, leaving a fractional wei in `reserve[id]`. Over the lifetime of a high-volume token ID this dust is negligible in absolute terms but means `reserve[id]` never naturally reaches exactly zero — even after every holder has exited.
+
+When the last token of an ID is burned `totalSupply[id]` reaches zero and the remaining dust is permanently trapped unless explicitly removed. The `sweepDust(id)` owner function reclaims it:
+
+- Reverts unless `totalSupply[id] == 0` — cannot sweep while any supply remains.
+- Sends the full remaining `reserve[id]` to the registered treasury, or to the owner if no treasury is set.
+- Emits `DustSwept(id, recipient, amount)` for auditability.
+
+In practice, accumulated dust across thousands of burns on a single token ID is expected to be on the order of a few hundred wei — well below any meaningful economic threshold. `sweepDust` is a housekeeping tool, not an emergency mechanism.
+
+### 3.5 Burn Restrictions
 
 `burn()` is blocked when:
 - `portfolioActive[id]` is true — holders must use `divest()`.

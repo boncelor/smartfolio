@@ -72,7 +72,9 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
       [owner, treasury.address, market.address, creditMarket.address],
       { kind: "uups" }
     );
+    await sf.pause({ from: owner });
     await sf.setLiquidityMarketFacet(liquidityMarket.address, { from: owner });
+    await sf.unpause({ from: owner });
     await sf.setTiers(TIERS, { from: owner });
     await sf.setKeeper(keeper, { from: owner });
 

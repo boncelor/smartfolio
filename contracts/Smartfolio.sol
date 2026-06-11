@@ -48,6 +48,12 @@ contract Smartfolio is
         __Pausable_init();
         maxBurnFeeRate = 0.5e18;
         slippageToleranceBps = 50;
+        priceMaxAge = 3600;
+        // Initialise OZ ReentrancyGuard namespaced slot to NOT_ENTERED (1).
+        // The OZ constructor handles this for non-upgradeable deployments; we
+        // must do it explicitly here because the proxy bypasses constructors.
+        bytes32 slot = _reentrancyGuardStorageSlot();
+        assembly { sstore(slot, 1) }
         treasuryFacet = _treasuryFacet;
         marketFacet = _marketFacet;
         creditMarketFacet = _creditMarketFacet;
@@ -62,11 +68,12 @@ contract Smartfolio is
     ///      success. Uses assembly for efficient calldata forwarding.
     ///
     ///      IMPORTANT: The assembly `return` bypasses the nonReentrant modifier's
-    ///      cleanup (`_reentrancyStatus = _NOT_ENTERED`). We reset slot 0 (the
-    ///      reentrancy status) to _NOT_ENTERED (1) inside the assembly before
-    ///      returning, so subsequent calls are not blocked.
+    ///      cleanup (_nonReentrantAfter). We explicitly reset the OZ
+    ///      ReentrancyGuard EIP-7201 namespaced slot to NOT_ENTERED (1) inside
+    ///      the assembly before returning, so subsequent calls are not blocked.
     function _delegateTo(address facet) internal {
         if (facet == address(0)) revert FacetNotSet();
+        bytes32 guardSlot = _reentrancyGuardStorageSlot();
         assembly {
             calldatacopy(0, 0, calldatasize())
             let result := delegatecall(gas(), facet, 0, calldatasize(), 0, 0)
@@ -74,9 +81,10 @@ contract Smartfolio is
             switch result
             case 0 { revert(0, returndatasize()) }
             default {
-                // Reset reentrancy guard (slot 0) to _NOT_ENTERED (1) before
-                // returning. The assembly `return` bypasses the modifier teardown.
-                sstore(0, 1)
+                // Reset OZ ReentrancyGuard namespaced slot to NOT_ENTERED (1)
+                // before returning. The assembly `return` bypasses the modifier
+                // teardown (_nonReentrantAfter), so we do it manually here.
+                sstore(guardSlot, 1)
                 return(0, returndatasize())
             }
         }
@@ -116,6 +124,13 @@ contract Smartfolio is
     function mintLeverage(uint256 id, uint256 amount, bytes memory data)
         external payable nonReentrant whenNotPaused
     {
+        // C-2: enforce single active leverage ID. If a different ID already has
+        // collateral in Aave, block this mint to prevent cross-ID LTV manipulation.
+        if (hasActiveLeverageId && activeLeverageId != id) revert LeverageIdConflict();
+        if (!hasActiveLeverageId) {
+            activeLeverageId = id;
+            hasActiveLeverageId = true;
+        }
         _delegateTo(creditMarketFacet);
     }
 
@@ -197,6 +212,7 @@ contract Smartfolio is
 
     function setTiers(TierConfig[] calldata tiers) external onlyOwner {
         if (tiers.length == 0) revert NoTiersProvided();
+        if (tiers.length > 20) revert TierLimitExceeded();
         if (tiers[0].pricePerToken == 0) revert PriceMustBePositive();
         for (uint256 i = 1; i < tiers.length; i++) {
             if (i < tiers.length - 1 && tiers[i].threshold <= tiers[i - 1].threshold)
@@ -208,6 +224,12 @@ contract Smartfolio is
     }
 
 
+    /// @notice Sweep rounding dust from a fully-burned token ID to the treasury
+    ///         (or the owner if no treasury is set). Reverts if any supply remains.
+    function sweepDust(uint256 id) external onlyOwner {
+        _delegateTo(treasuryFacet);
+    }
+
     function setMaxBurnFeeRate(uint256 rate) external onlyOwner {
         if (rate > MAX_BURN_FEE_CAP) revert ExceedsHardCap();
         maxBurnFeeRate = rate;
@@ -215,6 +237,7 @@ contract Smartfolio is
     }
 
     function setTreasury(address _treasury) external onlyOwner {
+        if (_treasury == address(0)) revert ZeroAddress();
         treasury = _treasury;
         emit TreasurySet(_treasury);
     }
@@ -273,6 +296,7 @@ contract Smartfolio is
 
     function setPortfolioConfig(uint256 id, PortfolioAsset[] calldata assets) external onlyOwner {
         if (assets.length == 0) revert NoAssetsProvided();
+        if (assets.length > 10) revert AssetLimitExceeded();
         if (portfolioActive[id]) revert PortfolioActive();
         if (lpActive[id]) revert LiquidityAlreadyActive();
         if (isLeverageToken[id]) revert IncompatibleTokenType();
@@ -347,29 +371,43 @@ contract Smartfolio is
         priceMaxAge = maxAge;
     }
 
+    /**
+     * @notice Clear the active leverage ID lock once a position is fully closed.
+     *         Callable by anyone; reverts if the position still carries Aave
+     *         collateral or debt, ensuring the lock cannot be released prematurely.
+     *
+     * @param id  The leverage token ID whose lock should be released.
+     */
+    function clearActiveLeverageId(uint256 id) external {
+        if (!hasActiveLeverageId || activeLeverageId != id) revert NoLeveragePosition();
+        if (aaveCollateral[id] != 0 || aaveDebt[id] != 0) revert DebtNotRepaid();
+        hasActiveLeverageId = false;
+        activeLeverageId = 0;
+    }
+
     // -------------------------------------------------------------------------
     // Admin — facet upgrades
     // -------------------------------------------------------------------------
 
-    function setTreasuryFacet(address facet) external onlyOwner {
+    function setTreasuryFacet(address facet) external onlyOwner whenPaused {
         if (facet == address(0)) revert ZeroAddress();
         treasuryFacet = facet;
         emit TreasuryFacetSet(facet);
     }
 
-    function setMarketFacet(address facet) external onlyOwner {
+    function setMarketFacet(address facet) external onlyOwner whenPaused {
         if (facet == address(0)) revert ZeroAddress();
         marketFacet = facet;
         emit MarketFacetSet(facet);
     }
 
-    function setCreditMarketFacet(address facet) external onlyOwner {
+    function setCreditMarketFacet(address facet) external onlyOwner whenPaused {
         if (facet == address(0)) revert ZeroAddress();
         creditMarketFacet = facet;
         emit CreditMarketFacetSet(facet);
     }
 
-    function setLiquidityMarketFacet(address facet) external onlyOwner {
+    function setLiquidityMarketFacet(address facet) external onlyOwner whenPaused {
         if (facet == address(0)) revert ZeroAddress();
         liquidityMarketFacet = facet;
         emit LiquidityMarketFacetSet(facet);
@@ -491,15 +529,8 @@ contract Smartfolio is
             info.healthFactor = type(uint256).max;
         }
 
-        // Chainlink price — best-effort; returns 0 if feed not set or call fails
-        address feed = ethUsdFeed[id];
-        if (feed != address(0)) {
-            try AggregatorV3Interface(feed).latestRoundData() returns (
-                uint80, int256 answer, uint256, uint256, uint80
-            ) {
-                if (answer > 0) info.ethPriceUsd = uint256(answer);
-            } catch {}
-        }
+        // Chainlink price — returns 0 if feed not set, stale, or call fails
+        info.ethPriceUsd = _safeChainlinkPrice(ethUsdFeed[id]);
     }
 
     /**
@@ -537,17 +568,12 @@ contract Smartfolio is
         uint256 stableBase = stableAmount * 100;
         uint256 wethBase   = stableBase; // $X stable → $X WETH at market rate
 
-        // Refine wethBase using Chainlink if available
-        address feed = ethUsdFeed[id];
-        if (feed != address(0)) {
-            try AggregatorV3Interface(feed).latestRoundData() returns (
-                uint80, int256 answer, uint256, uint256, uint80
-            ) {
-                // answer is ETH/USD with 8 decimals. Both stableBase and wethBase are
-                // already in 8-dec USD, so no further conversion needed — the dollar
-                // values cancel: $X stable buys $X WETH.
-                if (answer > 0) wethBase = stableBase; // confirmed 1:1 in USD terms
-            } catch {}
+        // Refine wethBase using Chainlink if available and fresh
+        if (_safeChainlinkPrice(ethUsdFeed[id]) > 0) {
+            // ETH/USD with 8 decimals. Both stableBase and wethBase are already in
+            // 8-dec USD, so no further conversion needed — dollar values cancel:
+            // $X stable buys $X WETH.
+            wethBase = stableBase;
         }
 
         uint256 newCollateralBase = totalCollateralBase + wethBase;

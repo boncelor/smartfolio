@@ -64,7 +64,9 @@ contract("SmartfolioLiquidityMarket", (accounts) => {
       [owner, treasury.address, market.address, creditMarket.address],
       { kind: "uups" }
     );
+    await sf.pause({ from: owner });
     await sf.setLiquidityMarketFacet(liquidityMarket.address, { from: owner });
+    await sf.unpause({ from: owner });
 
     // Configure tiers and keeper
     await sf.setTiers(TIERS, { from: owner });
@@ -208,7 +210,9 @@ contract("SmartfolioLiquidityMarket", (accounts) => {
       const creditMarket2 = await SmartfolioCreditMarket.new();
       const liqMarket2    = await SmartfolioLiquidityMarket.new();
       const sf2 = await deployProxy(Smartfolio, [owner, treasury2.address, market2.address, creditMarket2.address], { kind: "uups" });
+      await sf2.pause({ from: owner });
       await sf2.setLiquidityMarketFacet(liqMarket2.address, { from: owner });
+      await sf2.unpause({ from: owner });
       await sf2.setTiers(TIERS, { from: owner });
       await sf2.setKeeper(keeper, { from: owner });
       await sf2.setWETH(weth.address, { from: owner });

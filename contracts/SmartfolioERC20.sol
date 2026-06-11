@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 interface AggregatorV3Interface {
+    function decimals() external view returns (uint8);
     function latestRoundData() external view returns (
         uint80 roundId,
         int256 answer,
@@ -50,6 +51,7 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     error InsufficientSMFBalance();
     error SmartfolioNotSet();
     error FeedNotSet();
+    error InvalidFeedDecimals();
     error StalePrice();
     error InvalidPrice();
 
@@ -138,6 +140,7 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
 
     function setEthUsdFeed(address feed) external onlyOwner {
         if (feed == address(0)) revert FeedNotSet();
+        if (AggregatorV3Interface(feed).decimals() != 8) revert InvalidFeedDecimals();
         ethUsdFeed = AggregatorV3Interface(feed);
         emit EthUsdFeedSet(feed);
     }

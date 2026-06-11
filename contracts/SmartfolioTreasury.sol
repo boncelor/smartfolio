@@ -52,6 +52,20 @@ contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
         emit ReserveAdded(id, msg.value);
     }
 
+    /// @notice Sweep sub-wei rounding dust left in reserve[id] after all tokens have
+    ///         been burned. Sends to treasury if configured, otherwise to the caller
+    ///         (which is always the proxy owner, enforced by the entry point).
+    function sweepDust(uint256 id) external {
+        if (totalSupply[id] != 0) revert SupplyNotZero();
+        uint256 dust = reserve[id];
+        if (dust == 0) revert NoDust();
+        reserve[id] = 0;
+        address recipient = treasury != address(0) ? treasury : msg.sender;
+        emit DustSwept(id, recipient, dust);
+        (bool ok, ) = recipient.call{value: dust}("");
+        if (!ok) revert ETHTransferFailed();
+    }
+
     function burn(uint256 id, uint256 amount) external {
         if (portfolioActive[id]) revert UseDivest();
         if (lpActive[id])        revert UseDivest();
@@ -77,6 +91,7 @@ contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
         if (treasury != address(0) && fee > 0) {
             (bool feeOk, ) = treasury.call{value: fee}("");
             if (!feeOk) revert ETHTransferFailed();
+            emit FeeSent(treasury, fee);
         }
     }
 }
