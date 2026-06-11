@@ -4,6 +4,7 @@ const MockERC20       = artifacts.require("MockERC20");
 const MockWETH        = artifacts.require("MockWETH");
 const MockSwapRouter  = artifacts.require("MockSwapRouter");
 const MockAavePool    = artifacts.require("MockAavePool");
+const MockSMFToken    = artifacts.require("MockSMFToken");
 const SmartfolioTreasury     = artifacts.require("SmartfolioTreasury");
 const SmartfolioMarket       = artifacts.require("SmartfolioMarket");
 const SmartfolioCreditMarket = artifacts.require("SmartfolioCreditMarket");
@@ -748,9 +749,9 @@ contract("Smartfolio", (accounts) => {
   contract("Smartfolio — portfolio Phase 2", (accounts) => {
     const [owner, alice, keeper] = accounts;
 
-    let sf, tokenA, tokenB, mockWETH, mockRouter;
+    let sf, tokenA, tokenB, mockWETH, mockRouter, mockSMF;
 
-    // Portfolio: 20% SMF (owner), 50% tokenA (poolFee 3000), 30% tokenB (poolFee 500)
+    // Portfolio: 20% SMF, 50% tokenA (poolFee 3000), 30% tokenB (poolFee 500)
     const buildAssets = (addrA, addrB, smfAddr) => [
       { assetType: 3, token: smfAddr, weightBps: 2000, poolFee: 0,    swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
       { assetType: 0, token: addrA,   weightBps: 5000, poolFee: 3000, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
@@ -767,6 +768,7 @@ contract("Smartfolio", (accounts) => {
       tokenB     = await MockERC20.new("Token B", "TKB");
       mockWETH   = await MockWETH.new();
       mockRouter = await MockSwapRouter.new();
+      mockSMF    = await MockSMFToken.new();
 
       // Fund router with tokens so it can fulfil swaps
       await tokenA.mint(mockRouter.address, toWei("10000"));
@@ -775,6 +777,8 @@ contract("Smartfolio", (accounts) => {
       // Reserve is only 0.01 ETH so 0.1 ETH of WETH is ample.
       await mockWETH.deposit({ value: toWei("0.1"), from: owner });
       await mockWETH.transfer(mockRouter.address, toWei("0.1"), { from: owner });
+      // Fund MockSMFToken with ETH so it can pay out on sellSMF
+      await web3.eth.sendTransaction({ from: owner, to: mockSMF.address, value: toWei("1") });
 
       // Configure Smartfolio
       await sf.setKeeper(keeper, { from: owner });
@@ -783,12 +787,12 @@ contract("Smartfolio", (accounts) => {
 
       // Set tiers and portfolio config for TOKEN_ID
       await sf.setTiers(TIERS, { from: owner });
-      await sf.setSMFContract(owner, { from: owner });
-      await sf.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address, owner), { from: owner });
+      await sf.setSMFContract(mockSMF.address, { from: owner });
+      await sf.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address, mockSMF.address), { from: owner });
 
       // Alice mints 10 tokens (10 × 0.001 ETH = 0.01 ETH in reserve)
       const cost = await sf.mintCost(10);
-      await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
+      await mockSMF.mintFundedOnBehalf(sf.address, alice, TOKEN_ID, 10, { from: owner, value: cost });
     });
 
     // ---- deploy ----
@@ -798,7 +802,7 @@ contract("Smartfolio", (accounts) => {
         const reserveBefore = await sf.reserve(TOKEN_ID);
         assert.ok(new BN(reserveBefore).gt(new BN(0)), "reserve must be > 0 before deploy");
 
-        const tx = await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
+        const tx = await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper });
 
         // Reserve cleared
         assert.equal((await sf.reserve(TOKEN_ID)).toString(), "0");
@@ -830,37 +834,37 @@ contract("Smartfolio", (accounts) => {
       });
 
       it("reverts if already deployed", async () => {
-        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
-        await expectRevert(sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper }), "already deployed");
+        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper });
+        await expectRevert(sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper }), "already deployed");
       });
 
       it("reverts if no portfolio config", async () => {
         const OTHER_ID = 42;
         await sf.setTiers(TIERS, { from: owner });
         const cost = await sf.mintCost(1);
-        await sf.mintFunded(alice, OTHER_ID, 1, { from: owner, value: cost });
-        await expectRevert(sf.deploy(OTHER_ID, [], 0, 0, 0, { from: keeper }), "no portfolio config");
+        await mockSMF.mintFundedOnBehalf(sf.address, alice, OTHER_ID, 1, { from: owner, value: cost });
+        await expectRevert(sf.deploy(OTHER_ID, [], 0, 0, 0, 0, { from: keeper }), "no portfolio config");
       });
 
       it("reverts if no reserve", async () => {
         // Deploy once to drain reserve
-        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
+        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper });
         // Try to deploy a fresh token ID that has a config but no reserve
         const OTHER_ID = 43;
         await sf.setTiers(TIERS, { from: owner });
-        await sf.setPortfolioConfig(OTHER_ID, buildAssets(tokenA.address, tokenB.address, owner), { from: owner });
-        await expectRevert(sf.deploy(OTHER_ID, [0, 0], 0, 0, 0, { from: keeper }), "no reserve to deploy");
+        await sf.setPortfolioConfig(OTHER_ID, buildAssets(tokenA.address, tokenB.address, mockSMF.address), { from: owner });
+        await expectRevert(sf.deploy(OTHER_ID, [0, 0], 0, 0, 0, 0, { from: keeper }), "no reserve to deploy");
       });
 
       it("reverts if amountsOutMinimum length mismatches config", async () => {
         await expectRevert(
-          sf.deploy(TOKEN_ID, [0], 0, 0, 0, { from: keeper }), // config has 2 assets, only 1 min
+          sf.deploy(TOKEN_ID, [0], 0, 0, 0, 0, { from: keeper }), // config has 2 assets, only 1 min
           "length mismatch"
         );
       });
 
       it("reverts if called by non-keeper", async () => {
-        await expectRevert(sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: alice }), "not keeper");
+        await expectRevert(sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: alice }), "not keeper");
       });
 
       it("reverts if router is not set", async () => {
@@ -875,11 +879,11 @@ contract("Smartfolio", (accounts) => {
         await sf2.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address, owner), { from: owner });
         const cost = await sf2.mintCost(1);
         await sf2.mintFunded(alice, TOKEN_ID, 1, { from: owner, value: cost });
-        await expectRevert(sf2.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper }), "router not set");
+        await expectRevert(sf2.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper }), "router not set");
       });
 
       it("blocks setPortfolioConfig once portfolio is active", async () => {
-        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
+        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper });
         await expectRevert(
           sf.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address, owner), { from: owner }),
           "portfolio is active"
@@ -887,7 +891,7 @@ contract("Smartfolio", (accounts) => {
       });
 
       it("blocks burn() when portfolio is active", async () => {
-        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
+        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper });
         await expectRevert(
           sf.burn(TOKEN_ID, 1, { from: alice }),
           "use divest()"
@@ -900,7 +904,7 @@ contract("Smartfolio", (accounts) => {
     describe("rebalance", () => {
       beforeEach(async () => {
         // Deploy portfolio first
-        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
+        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper });
       });
 
       it("executes a sell + buy pair and updates holdings, emits Rebalanced", async () => {
@@ -941,7 +945,7 @@ contract("Smartfolio", (accounts) => {
       it("reverts if portfolio is not active", async () => {
         const OTHER_ID = 44;
         await sf.setTiers(TIERS, { from: owner });
-        await sf.setPortfolioConfig(OTHER_ID, buildAssets(tokenA.address, tokenB.address, owner), { from: owner });
+        await sf.setPortfolioConfig(OTHER_ID, buildAssets(tokenA.address, tokenB.address, mockSMF.address), { from: owner });
         const instructions = [
           { token: tokenA.address, isSell: true, amountIn: 1, amountOutMin: 0, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
         ];
@@ -968,7 +972,7 @@ contract("Smartfolio", (accounts) => {
   contract("Smartfolio — portfolio Phase 3", (accounts) => {
     const [owner, alice, bob, keeper] = accounts;
 
-    let sf, tokenA, tokenB, mockWETH, mockRouter;
+    let sf, tokenA, tokenB, mockWETH, mockRouter, mockSMF;
 
     const buildAssets = (addrA, addrB, smfAddr) => [
       { assetType: 3, token: smfAddr, weightBps: 2000, poolFee: 0,    swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
@@ -985,6 +989,7 @@ contract("Smartfolio", (accounts) => {
       tokenB     = await MockERC20.new("Token B", "TKB");
       mockWETH   = await MockWETH.new();
       mockRouter = await MockSwapRouter.new();
+      mockSMF    = await MockSMFToken.new();
 
       // Fund router: ERC20s for buys and WETH for sells
       await tokenA.mint(mockRouter.address, toWei("10000"));
@@ -992,20 +997,23 @@ contract("Smartfolio", (accounts) => {
       await mockWETH.deposit({ value: toWei("0.1"), from: owner });
       await mockWETH.transfer(mockRouter.address, toWei("0.1"), { from: owner });
 
+      // Fund MockSMFToken with ETH so it can pay out on sellSMF
+      await web3.eth.sendTransaction({ from: owner, to: mockSMF.address, value: toWei("1") });
+
       await sf.setKeeper(keeper, { from: owner });
       await sf.setSwapRouter(mockRouter.address, { from: owner });
       await sf.setWETH(mockWETH.address, { from: owner });
 
       await sf.setTiers(TIERS, { from: owner });
-      await sf.setSMFContract(owner, { from: owner });
-      await sf.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address, owner), { from: owner });
+      await sf.setSMFContract(mockSMF.address, { from: owner });
+      await sf.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address, mockSMF.address), { from: owner });
 
       // Alice mints 100 tokens → 0.1 ETH in reserve
       const cost = await sf.mintCost(100);
-      await sf.mintFunded(alice, TOKEN_ID, 100, { from: owner, value: cost });
+      await mockSMF.mintFundedOnBehalf(sf.address, alice, TOKEN_ID, 100, { from: owner, value: cost });
 
       // Deploy portfolio
-      await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
+      await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper });
     });
 
     // ---- helpers ----
@@ -1085,14 +1093,14 @@ contract("Smartfolio", (accounts) => {
         // Can set new config now that portfolio is inactive
         await sf.setPortfolioConfig(
           TOKEN_ID,
-          buildAssets(tokenA.address, tokenB.address, owner),
+          buildAssets(tokenA.address, tokenB.address, mockSMF.address),
           { from: owner }
         );
 
         // Bob mints and redeploys
         const cost = await sf.mintCost(10);
-        await sf.mintFunded(bob, TOKEN_ID, 10, { from: owner, value: cost });
-        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
+        await mockSMF.mintFundedOnBehalf(sf.address, bob, TOKEN_ID, 10, { from: owner, value: cost });
+        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper });
 
         assert.equal(await sf.portfolioActive(TOKEN_ID), true);
       });
@@ -1102,7 +1110,7 @@ contract("Smartfolio", (accounts) => {
         const cost = await sf.mintCost(100);
         // Need to undeploy for Bob to add to reserve... actually portfolio is active
         // so Bob can still mint (mint adds to reserve, does not go to portfolio automatically)
-        await sf.mintFunded(bob, TOKEN_ID, 100, { from: owner, value: cost });
+        await mockSMF.mintFundedOnBehalf(sf.address, bob, TOKEN_ID, 100, { from: owner, value: cost });
 
         const holdingABefore = new BN(await sf.portfolioHoldings(TOKEN_ID, tokenA.address));
         const supply = new BN(await sf.totalSupply(TOKEN_ID)); // 200
@@ -1151,11 +1159,11 @@ contract("Smartfolio", (accounts) => {
         await sf.setTiers(TIERS, { from: owner });
         await sf.setPortfolioConfig(
           OTHER_ID,
-          buildAssets(tokenA.address, tokenB.address, owner),
+          buildAssets(tokenA.address, tokenB.address, mockSMF.address),
           { from: owner }
         );
         const cost = await sf.mintCost(1);
-        await sf.mintFunded(alice, OTHER_ID, 1, { from: owner, value: cost });
+        await mockSMF.mintFundedOnBehalf(sf.address, alice, OTHER_ID, 1, { from: owner, value: cost });
         await expectRevert(
           sf.divest(OTHER_ID, 1, 0, { from: alice }),
           "portfolio not active"

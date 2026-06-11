@@ -10,6 +10,14 @@ interface IPortfolioAavePool {
     function withdraw(address asset, uint256 amount, address to) external returns (uint256);
 }
 
+interface ISMFToken {
+    function buySMF(uint256 amount) external payable;
+    function sellSMF(uint256 amount, uint256 minEthOut) external;
+    function balanceOf(address account) external view returns (uint256);
+    function transfer(address to, uint256 amount) external returns (bool);
+    function approve(address spender, uint256 amount) external returns (bool);
+}
+
 interface IPortfolioNPM {
     struct MintParams {
         address token0;
@@ -61,6 +69,7 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
     function deploy(
         uint256 id,
         uint256[] calldata erc20MinAmounts,
+        uint256 smfMinAmount,
         uint256 lpSwapAmountOutMin,
         uint256 lpAmount0Min,
         uint256 lpAmount1Min
@@ -112,11 +121,14 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
                 portfolioAaveWeth[id] += amountIn;
                 emit PortfolioAaveDeployed(id, amountIn);
             } else if (asset.assetType == AssetType.SMF) {
-                // Phase 3: unwrap WETH → ETH, buy SMF via bonding curve.
-                // Implemented in Phase 3. For now, unwrap and hold as raw ETH
-                // in the proxy (portfolioSMFHoldings tracks the pending ETH).
+                // Unwrap WETH → ETH then buy SMF via the bonding curve.
+                // smfMinAmount (keeper-supplied) is the minimum tokens expected;
+                // buySMF reverts internally if msg.value < cost for that amount.
                 weth.withdraw(amountIn);
-                portfolioSMFHoldings[id] += amountIn;
+                uint256 smfBefore = ISMFToken(smfContract).balanceOf(address(this));
+                ISMFToken(smfContract).buySMF{value: amountIn}(smfMinAmount);
+                uint256 smfReceived = ISMFToken(smfContract).balanceOf(address(this)) - smfBefore;
+                portfolioSMFHoldings[id] += smfReceived;
             } else {
                 // LP
                 if (positionManager == address(0)) revert NoPosManagerSet();
@@ -265,13 +277,14 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
                 emit PortfolioAaveDivested(id, withdrawn);
 
             } else if (asset.assetType == AssetType.SMF) {
-                // Phase 3: sell SMF via bonding curve and receive ETH.
-                // For now, return the pro-rata share of held ETH directly.
+                // Sell pro-rata SMF tokens via bonding curve; ETH lands in this contract.
                 if (portfolioSMFHoldings[id] == 0) continue;
-                uint256 smfEth = (portfolioSMFHoldings[id] * amount) / supply;
-                if (smfEth == 0) continue;
-                portfolioSMFHoldings[id] -= smfEth;
-                ethFromSMF += smfEth;
+                uint256 smfAmt = (portfolioSMFHoldings[id] * amount) / supply;
+                if (smfAmt == 0) continue;
+                portfolioSMFHoldings[id] -= smfAmt;
+                uint256 ethBefore = address(this).balance;
+                ISMFToken(smfContract).sellSMF(smfAmt, 0);
+                ethFromSMF += address(this).balance - ethBefore;
 
             } else {
                 // LP

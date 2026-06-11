@@ -160,7 +160,7 @@ contract Smartfolio is
         _delegateTo(creditMarketFacet);
     }
 
-    function deploy(uint256 id, uint256[] calldata erc20MinAmounts, uint256 lpSwapAmountOutMin, uint256 lpAmount0Min, uint256 lpAmount1Min)
+    function deploy(uint256 id, uint256[] calldata erc20MinAmounts, uint256 smfMinAmount, uint256 lpSwapAmountOutMin, uint256 lpAmount0Min, uint256 lpAmount1Min)
         external onlyKeeper nonReentrant
     {
         _delegateTo(marketFacet);

@@ -8,6 +8,7 @@ const SmartfolioTokenFactory = artifacts.require("SmartfolioTokenFactory");
 const MockAavePool           = artifacts.require("MockAavePool");
 const MockWETH               = artifacts.require("MockWETH");
 const MockERC20              = artifacts.require("MockERC20");
+const MockSMFToken           = artifacts.require("MockSMFToken");
 
 const toWei = (n) => web3.utils.toWei(String(n), "ether");
 
@@ -292,32 +293,37 @@ contract("SmartfolioToken + SmartfolioTokenFactory", (accounts) => {
     const MockSwapRouter = artifacts.require("MockSwapRouter");
 
     beforeEach(async () => {
-      const mweth  = await MockWETH.new();
-      const router = await MockSwapRouter.new();
-      const tokenA = await MockERC20.new("TokenA", "TKA");
+      const mweth   = await MockWETH.new();
+      const router  = await MockSwapRouter.new();
+      const tokenA  = await MockERC20.new("TokenA", "TKA");
+      const portSMF = await MockSMFToken.new();
 
       // Fund router so it can fulfil the WETH→tokenA swap during deploy.
       await tokenA.mint(router.address, toWei("10000"));
       await mweth.deposit({ value: toWei("0.1"), from: owner });
       await mweth.transfer(router.address, toWei("0.1"), { from: owner });
 
-      await sf.setWETH(mweth.address,    { from: owner });
-      await sf.setSwapRouter(router.address, { from: owner });
-      await sf.setKeeper(owner,          { from: owner });
-      await sf.setTiers(TIERS,  { from: owner });
+      // Fund MockSMFToken so it can pay out on sellSMF during divest.
+      await web3.eth.sendTransaction({ from: owner, to: portSMF.address, value: toWei("1") });
+
+      await sf.setWETH(mweth.address,        { from: owner });
+      await sf.setSwapRouter(router.address,  { from: owner });
+      await sf.setKeeper(owner,               { from: owner });
+      await sf.setTiers(TIERS,                { from: owner });
+      await sf.setSMFContract(portSMF.address, { from: owner });
       await sf.setPortfolioConfig(
         PORT_ID,
         [
-          { assetType: 3, token: owner,          weightBps: 2000, poolFee: 0,    swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
-          { assetType: 0, token: tokenA.address, weightBps: 8000, poolFee: 3000, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+          { assetType: 3, token: portSMF.address, weightBps: 2000, poolFee: 0,    swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+          { assetType: 0, token: tokenA.address,  weightBps: 8000, poolFee: 3000, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
         ],
         { from: owner }
       );
 
       // Mint tokens so there is a reserve, then deploy → portfolioActive[PORT_ID] = true.
       const cost = await sf.mintCost(5);
-      await sf.mintFunded(alice, PORT_ID, 5, { from: owner, value: cost });
-      await sf.deploy(PORT_ID, [0], 0, 0, 0, { from: owner });
+      await portSMF.mintFundedOnBehalf(sf.address, alice, PORT_ID, 5, { from: owner, value: cost });
+      await sf.deploy(PORT_ID, [0], 0, 0, 0, 0, { from: owner });
 
       // Deploy a wrapper for the portfolio token ID.
       await factory.deploy(PORT_ID, "Smartfolio Port 6", "SFP6", { from: owner });

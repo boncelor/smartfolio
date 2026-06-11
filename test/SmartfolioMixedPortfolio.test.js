@@ -22,6 +22,7 @@ const MockWETH                    = artifacts.require("MockWETH");
 const MockSwapRouter              = artifacts.require("MockSwapRouter");
 const MockAavePool                = artifacts.require("MockAavePool");
 const MockNonfungiblePositionManager = artifacts.require("MockNonfungiblePositionManager");
+const MockSMFToken                   = artifacts.require("MockSMFToken");
 
 const BN = web3.utils.BN;
 const toWei = (n, unit = "ether") => web3.utils.toWei(String(n), unit);
@@ -60,7 +61,7 @@ async function expectRevert(promise) {
 contract("SmartfolioMixedPortfolio", (accounts) => {
   const [owner, alice, bob, keeper] = accounts;
 
-  let sf, weth, tokenA, tokenB, router, aave, npm;
+  let sf, weth, tokenA, tokenB, router, aave, npm, mockSMF;
 
   beforeEach(async () => {
     const treasury        = await SmartfolioTreasury.new();
@@ -86,11 +87,14 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     aave   = await MockAavePool.new();
     npm    = await MockNonfungiblePositionManager.new();
 
+    mockSMF = await MockSMFToken.new();
+    await web3.eth.sendTransaction({ from: owner, to: mockSMF.address, value: toWei("1") });
+
     await sf.setWETH(weth.address,          { from: owner });
     await sf.setSwapRouter(router.address,   { from: owner });
     await sf.setDefaultAavePool(aave.address,{ from: owner });
     await sf.setPositionManager(npm.address, { from: owner });
-    await sf.setSMFContract(owner, { from: owner });
+    await sf.setSMFContract(mockSMF.address, { from: owner });
 
     // Pre-fund router: tokenA and tokenB for WETH→token swaps; WETH for token→WETH sells
     await tokenA.mint(router.address, toWei("100"));
@@ -106,7 +110,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
   describe("setPortfolioConfig — mixed types", () => {
     it("accepts a valid SMF+ERC20+AAVE+LP config (60% SMF unlocks both tiers)", async () => {
       await sf.setPortfolioConfig(TOKEN_ID, [
-        { assetType: SMF_TYPE,   token: owner,          weightBps: 6000, poolFee: 0, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: SMF_TYPE,   token: mockSMF.address, weightBps: 6000, poolFee: 0, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
         { assetType: ERC20_TYPE, token: tokenA.address, weightBps: 1000, poolFee: POOL_FEE, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
         { assetType: AAVE_TYPE,  token: "0x0000000000000000000000000000000000000000", weightBps: 1500, poolFee: 0, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
         { assetType: LP_TYPE,    token: tokenB.address, weightBps: 1500, poolFee: POOL_FEE, swapFee: SWAP_FEE, tickLower: TICK_LOW, tickUpper: TICK_HIGH, swapPath: "0x", sellSwapPath: "0x" },
@@ -152,23 +156,23 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
   describe("ERC20-only portfolio (regression)", () => {
     beforeEach(async () => {
       await sf.setPortfolioConfig(TOKEN_ID, [
-        { assetType: SMF_TYPE,   token: owner,          weightBps: 2000, poolFee: 0,        swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
-        { assetType: ERC20_TYPE, token: tokenA.address, weightBps: 4000, poolFee: POOL_FEE, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
-        { assetType: ERC20_TYPE, token: tokenB.address, weightBps: 4000, poolFee: POOL_FEE, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: SMF_TYPE,   token: mockSMF.address, weightBps: 2000, poolFee: 0,        swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: ERC20_TYPE, token: tokenA.address,  weightBps: 4000, poolFee: POOL_FEE, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: ERC20_TYPE, token: tokenB.address,  weightBps: 4000, poolFee: POOL_FEE, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
       ], { from: owner });
       const cost = await sf.mintCost(10);
-      await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
+      await mockSMF.mintFundedOnBehalf(sf.address, alice, TOKEN_ID, 10, { from: owner, value: cost });
     });
 
     it("deploys ERC20 basket and marks active", async () => {
-      await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
+      await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper });
       assert.equal(await sf.portfolioActive(TOKEN_ID), true);
       assert.ok(new BN(await sf.portfolioHoldings(TOKEN_ID, tokenA.address)).gt(new BN(0)));
       assert.ok(new BN(await sf.portfolioHoldings(TOKEN_ID, tokenB.address)).gt(new BN(0)));
     });
 
     it("divests and returns ETH", async () => {
-      await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper });
+      await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper });
       const tx = await sf.divest(TOKEN_ID, 10, 0, { from: alice });
       assert.ok(tx.logs.some(l => l.event === "Divested"));
       assert.equal(await sf.portfolioActive(TOKEN_ID), false);
@@ -183,16 +187,16 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     beforeEach(async () => {
       // AAVE requires ≥60% SMF
       await sf.setPortfolioConfig(TOKEN_ID, [
-        { assetType: SMF_TYPE,  token: owner, weightBps: 6000, poolFee: 0, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: SMF_TYPE,  token: mockSMF.address, weightBps: 6000, poolFee: 0, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
         { assetType: AAVE_TYPE, token: "0x0000000000000000000000000000000000000000", weightBps: 4000, poolFee: 0, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: "0x", sellSwapPath: "0x" },
       ], { from: owner });
       const cost = await sf.mintCost(10);
-      await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
+      await mockSMF.mintFundedOnBehalf(sf.address, alice, TOKEN_ID, 10, { from: owner, value: cost });
     });
 
     it("deploys WETH to Aave and records portfolioAaveWeth", async () => {
       const reserve = await sf.reserve(TOKEN_ID);
-      await sf.deploy(TOKEN_ID, [], 0, 0, 0, { from: keeper });
+      await sf.deploy(TOKEN_ID, [], 0, 0, 0, 0, { from: keeper });
 
       assert.equal(await sf.portfolioActive(TOKEN_ID), true);
       // AAVE slice is 40% of reserve (60% held in SMF stub)
@@ -205,12 +209,12 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     });
 
     it("emits PortfolioAaveDeployed", async () => {
-      const tx = await sf.deploy(TOKEN_ID, [], 0, 0, 0, { from: keeper });
+      const tx = await sf.deploy(TOKEN_ID, [], 0, 0, 0, 0, { from: keeper });
       assert.ok(tx.logs.some(l => l.event === "PortfolioAaveDeployed"), "should emit PortfolioAaveDeployed");
     });
 
     it("divests: withdraws proportional WETH from Aave and returns ETH", async () => {
-      await sf.deploy(TOKEN_ID, [], 0, 0, 0, { from: keeper });
+      await sf.deploy(TOKEN_ID, [], 0, 0, 0, 0, { from: keeper });
 
       const tx = await sf.divest(TOKEN_ID, 10, 0, { from: alice });
       assert.ok(tx.logs.some(l => l.event === "Divested"));
@@ -222,7 +226,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     });
 
     it("partial divest reduces portfolioAaveWeth proportionally", async () => {
-      await sf.deploy(TOKEN_ID, [], 0, 0, 0, { from: keeper });
+      await sf.deploy(TOKEN_ID, [], 0, 0, 0, 0, { from: keeper });
       const aaveBefore = new BN(await sf.portfolioAaveWeth(TOKEN_ID));
 
       await sf.divest(TOKEN_ID, 5, 0, { from: alice }); // 50%
@@ -244,15 +248,15 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     beforeEach(async () => {
       // LP requires ≥40% SMF
       await sf.setPortfolioConfig(TOKEN_ID, [
-        { assetType: SMF_TYPE, token: owner,          weightBps: 4000, poolFee: 0,        swapFee: 0,        tickLower: 0,        tickUpper: 0,         swapPath: "0x", sellSwapPath: "0x" },
+        { assetType: SMF_TYPE, token: mockSMF.address, weightBps: 4000, poolFee: 0,        swapFee: 0,        tickLower: 0,        tickUpper: 0,         swapPath: "0x", sellSwapPath: "0x" },
         { assetType: LP_TYPE,  token: tokenB.address, weightBps: 6000, poolFee: POOL_FEE, swapFee: SWAP_FEE, tickLower: TICK_LOW, tickUpper: TICK_HIGH, swapPath: "0x", sellSwapPath: "0x" },
       ], { from: owner });
       const cost = await sf.mintCost(10);
-      await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
+      await mockSMF.mintFundedOnBehalf(sf.address, alice, TOKEN_ID, 10, { from: owner, value: cost });
     });
 
     it("deploys LP position and records portfolioLpLiquidity", async () => {
-      await sf.deploy(TOKEN_ID, [], 0, 0, 0, { from: keeper });
+      await sf.deploy(TOKEN_ID, [], 0, 0, 0, 0, { from: keeper });
 
       assert.equal(await sf.portfolioActive(TOKEN_ID), true);
       const lpInfo = await sf.getPortfolioLPInfo(TOKEN_ID);
@@ -261,12 +265,12 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     });
 
     it("emits PortfolioLPDeployed", async () => {
-      const tx = await sf.deploy(TOKEN_ID, [], 0, 0, 0, { from: keeper });
+      const tx = await sf.deploy(TOKEN_ID, [], 0, 0, 0, 0, { from: keeper });
       assert.ok(tx.logs.some(l => l.event === "PortfolioLPDeployed"), "should emit PortfolioLPDeployed");
     });
 
     it("divests: removes LP position and returns ETH", async () => {
-      await sf.deploy(TOKEN_ID, [], 0, 0, 0, { from: keeper });
+      await sf.deploy(TOKEN_ID, [], 0, 0, 0, 0, { from: keeper });
 
       const tx = await sf.divest(TOKEN_ID, 10, 0, { from: alice });
       assert.ok(tx.logs.some(l => l.event === "Divested"));
@@ -276,7 +280,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     });
 
     it("partial divest removes proportional LP liquidity", async () => {
-      await sf.deploy(TOKEN_ID, [], 0, 0, 0, { from: keeper });
+      await sf.deploy(TOKEN_ID, [], 0, 0, 0, 0, { from: keeper });
       const lpBefore = new BN((await sf.getPortfolioLPInfo(TOKEN_ID)).liquidity);
 
       await sf.divest(TOKEN_ID, 5, 0, { from: alice }); // 50%
@@ -300,14 +304,14 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     ];
 
     beforeEach(async () => {
-      await sf.setPortfolioConfig(TOKEN_ID, mixedConfig(tokenA.address, tokenB.address, owner), { from: owner });
+      await sf.setPortfolioConfig(TOKEN_ID, mixedConfig(tokenA.address, tokenB.address, mockSMF.address), { from: owner });
       const cost = await sf.mintCost(10);
-      await sf.mintFunded(alice, TOKEN_ID, 10, { from: owner, value: cost });
+      await mockSMF.mintFundedOnBehalf(sf.address, alice, TOKEN_ID, 10, { from: owner, value: cost });
     });
 
     it("deploy correctly splits ETH across ERC20, AAVE and LP types", async () => {
       const reserveBefore = new BN(await sf.reserve(TOKEN_ID));
-      await sf.deploy(TOKEN_ID, [0], 0, 0, 0, { from: keeper });
+      await sf.deploy(TOKEN_ID, [0], 0, 0, 0, 0, { from: keeper });
 
       assert.equal(await sf.portfolioActive(TOKEN_ID), true);
 
@@ -327,14 +331,14 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     });
 
     it("deploy emits Deployed, PortfolioAaveDeployed, PortfolioLPDeployed", async () => {
-      const tx = await sf.deploy(TOKEN_ID, [0], 0, 0, 0, { from: keeper });
+      const tx = await sf.deploy(TOKEN_ID, [0], 0, 0, 0, 0, { from: keeper });
       assert.ok(tx.logs.some(l => l.event === "Deployed"),              "Deployed event missing");
       assert.ok(tx.logs.some(l => l.event === "PortfolioAaveDeployed"), "PortfolioAaveDeployed event missing");
       assert.ok(tx.logs.some(l => l.event === "PortfolioLPDeployed"),   "PortfolioLPDeployed event missing");
     });
 
     it("full divest returns ETH from all three slices and resets active", async () => {
-      await sf.deploy(TOKEN_ID, [0], 0, 0, 0, { from: keeper });
+      await sf.deploy(TOKEN_ID, [0], 0, 0, 0, 0, { from: keeper });
 
       const tx = await sf.divest(TOKEN_ID, 10, 0, { from: alice });
       assert.ok(tx.logs.some(l => l.event === "Divested"));
@@ -349,9 +353,9 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     it("partial divest by alice, remainder by bob", async () => {
       // Bob mints too (equal share)
       const cost = await sf.mintCost(10);
-      await sf.mintFunded(bob, TOKEN_ID, 10, { from: owner, value: cost });
+      await mockSMF.mintFundedOnBehalf(sf.address, bob, TOKEN_ID, 10, { from: owner, value: cost });
 
-      await sf.deploy(TOKEN_ID, [0], 0, 0, 0, { from: keeper });
+      await sf.deploy(TOKEN_ID, [0], 0, 0, 0, 0, { from: keeper });
 
       // Alice divests her 10 (50% of supply=20)
       await sf.divest(TOKEN_ID, 10, 0, { from: alice });
@@ -363,19 +367,19 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     });
 
     it("reverts minEthOut not met", async () => {
-      await sf.deploy(TOKEN_ID, [0], 0, 0, 0, { from: keeper });
+      await sf.deploy(TOKEN_ID, [0], 0, 0, 0, 0, { from: keeper });
       await expectRevert(sf.divest(TOKEN_ID, 10, toWei("999"), { from: alice }));
     });
 
     it("erc20MinAmounts length must match ERC20 slot count", async () => {
       // Pass 2 minAmounts for 1 ERC20 slot — should revert
       await expectRevert(
-        sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, { from: keeper })
+        sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper })
       );
     });
 
     it("globalTotalSupply decreases on divest", async () => {
-      await sf.deploy(TOKEN_ID, [0], 0, 0, 0, { from: keeper });
+      await sf.deploy(TOKEN_ID, [0], 0, 0, 0, 0, { from: keeper });
       const before = new BN(await sf.globalTotalSupply());
       await sf.divest(TOKEN_ID, 5, 0, { from: alice });
       const after = new BN(await sf.globalTotalSupply());
@@ -383,7 +387,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     });
 
     it("burn reverts while portfolio is active", async () => {
-      await sf.deploy(TOKEN_ID, [0], 0, 0, 0, { from: keeper });
+      await sf.deploy(TOKEN_ID, [0], 0, 0, 0, 0, { from: keeper });
       await expectRevert(sf.burn(TOKEN_ID, 1, { from: alice }));
     });
   });
