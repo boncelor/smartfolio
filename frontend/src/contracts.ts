@@ -113,6 +113,16 @@ export const SMF_ABI = [
     ],
     outputs: [],
   },
+  {
+    name: 'NFTMinted',
+    type: 'event',
+    inputs: [
+      { name: 'account', type: 'address', indexed: true },
+      { name: 'id', type: 'uint256', indexed: true },
+      { name: 'smfBurned', type: 'uint256', indexed: false },
+      { name: 'ethLocked', type: 'uint256', indexed: false },
+    ],
+  },
 ] as const
 
 export const SMARTFOLIO_ABI = [

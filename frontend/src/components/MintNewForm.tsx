@@ -1,14 +1,15 @@
 import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi'
 import { useState } from 'react'
-import { formatEther } from 'viem'
+import { formatEther, decodeEventLog } from 'viem'
 import { SMF_ADDRESS, SMF_ABI } from '../contracts'
 
 export default function MintNewForm() {
   const [open, setOpen] = useState(false)
   const [slippagePct, setSlippagePct] = useState('1')
+  const [mintedId, setMintedId] = useState<bigint | null>(null)
   const { isConnected } = useAccount()
 
-  const { data: smfSimulation } = useReadContract({
+  const { data: smfSimulation, error: smfError, isLoading: smfLoading } = useReadContract({
     address: SMF_ADDRESS,
     abi: SMF_ABI,
     functionName: 'smfForNFT',
@@ -17,12 +18,15 @@ export default function MintNewForm() {
   const smfRequired = smfSimulation?.[0]
   const ethNeeded = smfSimulation?.[1]
 
+  const oracleNotSet = !smfLoading && smfError != null
+
   const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract()
-  const { isLoading: isConfirming, isSuccess: isConfirmed } =
+  const { isLoading: isConfirming, isSuccess: isConfirmed, data: receipt } =
     useWaitForTransactionReceipt({ hash: txHash })
 
   function handleMint() {
     if (smfRequired === undefined) return
+    setMintedId(null)
     const slippage = 1 + (parseFloat(slippagePct) || 1) / 100
     const maxBurn = BigInt(Math.ceil(Number(smfRequired) * slippage))
     writeContract({
@@ -31,6 +35,19 @@ export default function MintNewForm() {
       functionName: 'mintNFT',
       args: [maxBurn],
     })
+  }
+
+  // Parse NFTMinted event to get the assigned token ID
+  if (isConfirmed && receipt && mintedId === null) {
+    for (const log of receipt.logs) {
+      try {
+        const decoded = decodeEventLog({ abi: SMF_ABI, ...log })
+        if (decoded.eventName === 'NFTMinted') {
+          setMintedId((decoded.args as { id: bigint }).id)
+          break
+        }
+      } catch { /* not this event */ }
+    }
   }
 
   const isDisabled = !isConnected || smfRequired === undefined || isPending || isConfirming
@@ -82,6 +99,16 @@ export default function MintNewForm() {
             </div>
           </div>
 
+          {oracleNotSet && (
+            <p className="text-sm" style={{ color: '#f87171' }}>
+              Oracle not configured — price feed is not set. Contact the admin.
+            </p>
+          )}
+
+          {smfLoading && (
+            <p className="text-sm" style={{ color: 'rgba(212,175,55,0.5)' }}>Loading mint cost…</p>
+          )}
+
           {smfRequired !== undefined && (
             <div className="space-y-2">
               <div className="flex items-center justify-between box-info">
@@ -103,7 +130,12 @@ export default function MintNewForm() {
             {isPending ? 'Confirm in wallet…' : isConfirming ? 'Minting…' : 'Mint with SMF'}
           </button>
 
-          {isConfirmed && (
+          {isConfirmed && mintedId !== null && (
+            <p className="text-sm font-semibold" style={{ color: '#34d399' }}>
+              Minted! NFT #{mintedId.toString()} created.
+            </p>
+          )}
+          {isConfirmed && mintedId === null && (
             <p className="text-sm font-semibold" style={{ color: '#34d399' }}>Minted! Transaction confirmed.</p>
           )}
           {writeError && (
