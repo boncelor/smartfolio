@@ -8,7 +8,6 @@ import LeverageInfoCard from './components/LeverageInfoCard'
 import MintLeverageForm from './components/MintLeverageForm'
 import DivestLeverageForm from './components/DivestLeverageForm'
 import KeeperPanel from './components/KeeperPanel'
-import WrapUnwrapPanel from './components/WrapUnwrapPanel'
 import LPInfoCard from './components/LPInfoCard'
 import DivestLPForm from './components/DivestLPForm'
 import SMFPanel from './components/SMFPanel'
@@ -18,7 +17,7 @@ import PortfolioInfoCard from './components/PortfolioInfoCard'
 import PortfolioConfigForm from './components/PortfolioConfigForm'
 import PortfolioKeeperPanel from './components/PortfolioKeeperPanel'
 
-type Tab = 'smf' | 'nft' | 'portfolio' | 'divest' | 'leverage' | 'lp' | 'wrap'
+type Tab = 'smf' | 'nft' | 'portfolio' | 'divest' | 'leverage' | 'lp'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
@@ -29,7 +28,6 @@ const TAB_LABELS: Record<Tab, string> = {
   divest:    'Divest',
   leverage:  'Leverage',
   lp:        'LP',
-  wrap:      'Wrap / Unwrap',
 }
 
 const TABS = Object.keys(TAB_LABELS) as Tab[]
@@ -176,12 +174,6 @@ export default function App() {
               <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
               <LPInfoCard tokenId={tokenId} />
               <DivestLPForm tokenId={tokenId} />
-            </div>
-          )}
-          {activeTab === 'wrap' && (
-            <div className="space-y-4">
-              <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
-              <WrapUnwrapPanel tokenId={tokenId} />
             </div>
           )}
         </div>
