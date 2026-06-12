@@ -1,6 +1,6 @@
-import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi'
+import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useAccount, useBalance } from 'wagmi'
 import { useState, useEffect } from 'react'
-import { formatEther, decodeEventLog, parseEther } from 'viem'
+import { formatEther, decodeEventLog } from 'viem'
 import { SMF_ADDRESS, SMF_ABI } from '../contracts'
 
 type Phase = 'idle' | 'minting' | 'topping-up' | 'done'
@@ -41,6 +41,9 @@ export default function MintNewForm() {
     args: [BigInt(parsedExtra)],
     query: { enabled: parsedExtra > 0 },
   })
+
+  // SMF contract ETH balance — addToNFT needs this to cover ethAmount
+  const { data: smfContractBalance } = useBalance({ address: SMF_ADDRESS })
 
   // --- Tx 1: mintNFT ---
   const { writeContract: writeMint, data: mintHash, isPending: mintPending, error: mintError, reset: resetMint } = useWriteContract()
@@ -108,11 +111,14 @@ export default function MintNewForm() {
   }
 
   const totalSmf = smfRequired !== undefined ? smfRequired + BigInt(parsedExtra) : undefined
-  const totalSmfNum = smfBalance !== undefined && totalSmf !== undefined ? totalSmf : undefined
   const insufficientBalance = smfBalance !== undefined && totalSmf !== undefined && smfBalance < totalSmf
+  // addToNFT sends ETH from the SMF contract balance — check it can cover the top-up
+  const totalEthNeeded = (ethNeeded ?? 0n) + (extraEth ?? 0n)
+  const insufficientContractEth = smfContractBalance !== undefined && parsedExtra > 0
+    && smfContractBalance.value < totalEthNeeded
   const costError = !smfLoading && smfError != null
 
-  const isDisabled = !isConnected || smfRequired === undefined || phase !== 'idle' || insufficientBalance
+  const isDisabled = !isConnected || smfRequired === undefined || phase !== 'idle' || insufficientBalance || insufficientContractEth
 
   // Status label
   let statusLabel = 'Mint with SMF'
@@ -214,6 +220,12 @@ export default function MintNewForm() {
               {insufficientBalance && (
                 <p className="text-xs" style={{ color: '#f87171' }}>
                   Insufficient SMF balance ({smfBalance?.toString()} available, {(smfRequired + BigInt(parsedExtra)).toString()} needed)
+                </p>
+              )}
+
+              {insufficientContractEth && smfContractBalance !== undefined && (
+                <p className="text-xs" style={{ color: '#f87171' }}>
+                  The SMF contract only holds {formatEther(smfContractBalance.value)} ETH — reduce the extra SMF or buy more SMF into the pool first.
                 </p>
               )}
 
