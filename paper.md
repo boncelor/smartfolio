@@ -323,16 +323,56 @@ When SMF is burned the inverse curve is traversed: starting from the highest occ
 
 ### 5.3 Minting NFTs with SMF
 
-A user calls `mintNFT(maxSmfBurn)`:
+A user calls `mintNFT()`:
 
-1. The NFT floor price is $10 USD, converted to ETH via Chainlink ETH/USD oracle: `ethNeeded = (10e18 × 1e8) / ethPrice`.
-2. `smfToBurn = _smfAmountForEth(ethNeeded)` — inverse curve traversal.
-3. Reverts if `smfToBurn > maxSmfBurn` (slippage guard).
-4. Burns `smfToBurn` SMF from the caller; decrements `smfTotalSupply`.
-5. Calls `Smartfolio.mintFundedNew{value: ethNeeded}(caller)` — auto-assigns a new token ID, mints 1 ERC1155, and adds `ethNeeded` to `reserve[id]`.
-6. Returns the newly assigned `id`.
+1. `smfToBurn = _nftMintCost()` — dynamic cost, fully deterministic from on-chain state (no oracle).
+2. Burns `smfToBurn` SMF from the caller; decrements `smfTotalSupply`; increments `nftCount` and `totalSmfLockedInNFTs`.
+3. `ethNeeded = _ethForSmfAmount(smfToBurn)` — ETH equivalent of the burned SMF on the bonding curve.
+4. Calls `Smartfolio.mintFundedNew{value: ethNeeded}(caller)` — auto-assigns a new token ID, mints 1 ERC1155, and adds `ethNeeded` to `reserve[id]`.
+5. Returns the newly assigned `id`.
 
-The NFT token ID is auto-assigned by the Smartfolio contract (`mintFundedNew`). There is no conversion fee — the entire ETH released by the burn flows into the NFT's reserve.
+No slippage param is needed — the cost is a pure function of on-chain state and only changes discretely when a new NFT is minted, not continuously.
+
+#### Dynamic Cost Formula
+
+```
+effective_n  = nftCount > nftGrace ? nftCount - nftGrace : 0
+log_steps    = floor(log2(effective_n + 1))
+ratio        = totalSmfLockedInNFTs × 1e18 / smfTotalMinted   (0 if smfTotalMinted = 0)
+ratio_mult   = 1e18 + nftRatioScale × ratio / 1e18             (∈ [1×, 3×] at default scale)
+smfToBurn    = nftCostMin + nftCostBase × log_steps × ratio_mult / 1e18
+```
+
+`log_steps` is computed via bit-length (`floor(log2(x+1))`): exact, zero-division-safe, no floating point.
+
+**Configurable parameters (owner-settable):**
+
+| Parameter | Default | Role |
+|---|---|---|
+| `nftGrace` | 10 | NFTs within this count all pay floor cost only |
+| `nftCostMin` | 1 SMF | floor cost always applied (no free minting) |
+| `nftCostBase` | 5 SMF | additional cost per log step |
+| `nftRatioScale` | 2e18 | max multiplier from lock ratio (2× at ratio=1) |
+
+**Growth profile (defaults, ratio=0):**
+
+| NFT # | `effective_n` | `log_steps` | cost |
+|---|---|---|---|
+| 1–11 | 0 | 0 | 1 SMF |
+| 12–13 | 1–2 | 1 | 6 SMF |
+| 14–17 | 3–6 | 2 | 11 SMF |
+| 18–25 | 7–14 | 3 | 16 SMF |
+| 42–73 | 31–62 | 5 | 26 SMF |
+| 1034+ | 1023+ | 10 | 51 SMF |
+
+At `ratio = 0.5` (half of all ever-minted SMF locked in NFTs) the `ratio_mult` reaches 2×, doubling all costs above the floor.
+
+#### Tracking State
+
+Two accumulators are maintained on `SmartfolioERC20`:
+
+- `nftCount` — total NFTs ever minted via `mintNFT()`. Drives the logarithmic component.
+- `totalSmfLockedInNFTs` — cumulative SMF burned specifically for NFT minting. Drives the lock-ratio component.
 
 ### 5.4 Topping Up a Reserve
 
@@ -360,7 +400,7 @@ Both revert with `CallerNotSMFContract` if called by any other address. The SMF 
 |---|---|
 | `smfMintCost(amount)` | ETH cost to buy `amount` SMF |
 | `smfBurnValue(amount)` | ETH received from selling `amount` SMF |
-| `smfForNFT()` | `(smfRequired, ethNeeded)` — simulate `mintNFT` cost at current oracle price |
+| `smfForNFT()` | `(smfRequired, ethNeeded)` — simulate `mintNFT` cost from current on-chain state |
 | `smfForReserve(ethAmount)` | `smfRequired` — simulate `addToNFT` cost |
 | `getTiers()` | Current SMF tier configuration |
 

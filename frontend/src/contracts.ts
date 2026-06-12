@@ -69,10 +69,22 @@ export const SMF_ABI = [
     name: 'mintNFT',
     type: 'function',
     stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'maxSmfBurn', type: 'uint256' },
-    ],
+    inputs: [],
     outputs: [{ name: 'id', type: 'uint256' }],
+  },
+  {
+    name: 'nftCount',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'totalSmfLockedInNFTs',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
   },
   {
     name: 'addToNFT',

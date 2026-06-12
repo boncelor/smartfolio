@@ -5,7 +5,6 @@ import { SMF_ADDRESS, SMF_ABI } from '../contracts'
 
 export default function MintNewForm() {
   const [open, setOpen] = useState(false)
-  const [slippagePct, setSlippagePct] = useState('1')
   const [mintedId, setMintedId] = useState<bigint | null>(null)
   const { isConnected } = useAccount()
 
@@ -18,7 +17,7 @@ export default function MintNewForm() {
   const smfRequired = smfSimulation?.[0]
   const ethNeeded = smfSimulation?.[1]
 
-  const oracleNotSet = !smfLoading && smfError != null
+  const costError = !smfLoading && smfError != null
 
   const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract()
   const { isLoading: isConfirming, isSuccess: isConfirmed, data: receipt } =
@@ -27,13 +26,11 @@ export default function MintNewForm() {
   function handleMint() {
     if (smfRequired === undefined) return
     setMintedId(null)
-    const slippage = 1 + (parseFloat(slippagePct) || 1) / 100
-    const maxBurn = BigInt(Math.ceil(Number(smfRequired) * slippage))
     writeContract({
       address: SMF_ADDRESS,
       abi: SMF_ABI,
       functionName: 'mintNFT',
-      args: [maxBurn],
+      args: [],
     })
   }
 
@@ -81,27 +78,13 @@ export default function MintNewForm() {
       {open && (
         <>
           <p className="text-xs" style={{ color: 'rgba(212,175,55,0.5)' }}>
-            A new NFT will be created with an auto-assigned ID. Each mint costs a $10 USD floor in SMF.
+            A new NFT will be created with an auto-assigned ID. The cost in SMF grows logarithmically
+            with the number of NFTs minted and the ratio of locked SMF.
           </p>
 
-          <div className="space-y-1">
-            <label className="stat-label">Slippage tolerance</label>
-            <div className="relative flex items-center" style={{ maxWidth: '8rem' }}>
-              <input
-                type="number"
-                min={0.1}
-                step={0.1}
-                value={slippagePct}
-                onChange={(e) => setSlippagePct(e.target.value)}
-                className="input-money pr-8"
-              />
-              <span className="absolute right-3 text-sm pointer-events-none" style={{ color: 'rgba(212,175,55,0.5)' }}>%</span>
-            </div>
-          </div>
-
-          {oracleNotSet && (
+          {costError && (
             <p className="text-sm" style={{ color: '#f87171' }}>
-              Oracle not configured — price feed is not set. Contact the admin.
+              Could not read mint cost — check contract configuration.
             </p>
           )}
 
@@ -115,7 +98,7 @@ export default function MintNewForm() {
                 <span className="stat-label" style={{ marginBottom: 0 }}>SMF to burn</span>
                 <span className="font-semibold text-gold">{formatEther(smfRequired)} SMF</span>
               </div>
-              {ethNeeded !== undefined && (
+              {ethNeeded !== undefined && ethNeeded > 0n && (
                 <div className="flex items-center justify-between box-info">
                   <span className="stat-label" style={{ marginBottom: 0 }}>ETH locked in reserve</span>
                   <span className="font-semibold" style={{ color: 'rgba(255,255,255,0.7)' }}>

@@ -78,13 +78,6 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     }
 
     // -------------------------------------------------------------------------
-    // Constants
-    // -------------------------------------------------------------------------
-
-    /// @dev $10 USD floor per NFT mint (in USD with 18 decimals for precision).
-    uint256 public constant NFT_FLOOR_USD = 10e18;
-
-    // -------------------------------------------------------------------------
     // State
     // -------------------------------------------------------------------------
 
@@ -94,8 +87,16 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
 
     address public smartfolio;       // Smartfolio proxy
     address public treasury;         // future use
-    AggregatorV3Interface public ethUsdFeed;   // Chainlink ETH/USD feed
+    AggregatorV3Interface public ethUsdFeed;   // Chainlink ETH/USD feed (kept for future use)
     uint256 public priceMaxAge = 30 minutes;   // staleness threshold
+
+    // NFT minting cost parameters
+    uint256 public nftCount;                  // total NFTs ever minted
+    uint256 public totalSmfLockedInNFTs;      // cumulative SMF burned for NFT minting
+    uint256 public nftGrace     = 10;         // NFTs within this count pay floor cost only
+    uint256 public nftCostMin   = 1e18;       // floor cost in SMF (1 SMF, 18 decimals)
+    uint256 public nftCostBase  = 5e18;       // cost per log step in SMF (5 SMF)
+    uint256 public nftRatioScale = 2e18;      // max lock-ratio multiplier (2× at ratio=1)
 
     // -------------------------------------------------------------------------
     // Constructor
@@ -147,6 +148,18 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
 
     function setPriceMaxAge(uint256 maxAge) external onlyOwner {
         priceMaxAge = maxAge;
+    }
+
+    function setNftCostParams(
+        uint256 _nftGrace,
+        uint256 _nftCostMin,
+        uint256 _nftCostBase,
+        uint256 _nftRatioScale
+    ) external onlyOwner {
+        nftGrace      = _nftGrace;
+        nftCostMin    = _nftCostMin;
+        nftCostBase   = _nftCostBase;
+        nftRatioScale = _nftRatioScale;
     }
 
     // -------------------------------------------------------------------------
@@ -206,27 +219,23 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     // -------------------------------------------------------------------------
 
     /**
-     * @notice Burn SMF to mint 1 new ERC1155 NFT. The token ID is auto-assigned by
-     *         the Smartfolio contract. The NFT floor price is $10 USD, converted to
-     *         ETH via Chainlink oracle. The ETH backing flows into the new NFT's reserve.
-     * @param maxSmfBurn  Slippage guard — reverts if SMF to burn exceeds this.
-     * @return id         The newly assigned Smartfolio token ID.
+     * @notice Burn SMF to mint 1 new ERC1155 NFT. Cost is determined dynamically by
+     *         `_nftMintCost()` — no oracle, no slippage param needed.
+     * @return id  The newly assigned Smartfolio token ID.
      */
-    function mintNFT(uint256 maxSmfBurn) external nonReentrant returns (uint256 id) {
+    function mintNFT() external nonReentrant returns (uint256 id) {
         if (smartfolio == address(0)) revert SmartfolioNotSet();
 
-        // $10 USD → ETH using Chainlink (8-decimal price feed)
-        // ethNeeded = ($10 * 1e18) / (ethPrice / 1e8) = (10e18 * 1e8) / ethPrice
-        uint256 ethPrice = _getEthPrice();
-        uint256 ethNeeded = (NFT_FLOOR_USD * 1e8) / ethPrice;
-
-        uint256 smfToBurn = _smfAmountForEth(ethNeeded);
-        if (smfToBurn > maxSmfBurn) revert SlippageExceeded();
+        uint256 smfToBurn = _nftMintCost();
         if (balanceOf(msg.sender) < smfToBurn) revert InsufficientSMFBalance();
 
         smfTotalSupply -= smfToBurn;
         _burn(msg.sender, smfToBurn);
 
+        nftCount += 1;
+        totalSmfLockedInNFTs += smfToBurn;
+
+        uint256 ethNeeded = _ethForSmfAmount(smfToBurn);
         id = ISmartfolio(smartfolio).mintFundedNew{value: ethNeeded}(msg.sender);
 
         emit NFTMinted(msg.sender, id, smfToBurn, ethNeeded);
@@ -275,18 +284,19 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice Simulate the SMF cost to mint 1 new NFT.
+     * @notice Simulate the SMF cost to mint 1 new NFT and the ETH that will flow
+     *         into the NFT's reserve. Fully deterministic — no oracle required.
      * @return smfRequired  SMF to burn.
-     * @return ethNeeded    ETH value locked into the NFT reserve ($10 USD floor).
+     * @return ethNeeded    ETH value locked into the NFT reserve.
      */
     function smfForNFT()
         external view
         returns (uint256 smfRequired, uint256 ethNeeded)
     {
-        if (smartfolio == address(0)) revert SmartfolioNotSet();
-        uint256 ethPrice = _getEthPrice();
-        ethNeeded = (NFT_FLOOR_USD * 1e8) / ethPrice;
-        smfRequired = _smfAmountForEth(ethNeeded);
+        smfRequired = _nftMintCost();
+        if (smfRequired > 0) {
+            ethNeeded = _ethForSmfAmount(smfRequired);
+        }
     }
 
     /**
@@ -298,6 +308,39 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
 
     function getTiers() external view returns (TierConfig[] memory) {
         return _tiers;
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal — dynamic NFT mint cost
+    // -------------------------------------------------------------------------
+
+    /**
+     * @dev Dynamic NFT minting cost in SMF (18-decimal units).
+     *
+     *   effective_n  = nftCount > nftGrace ? nftCount - nftGrace : 0
+     *   log_steps    = floor(log2(effective_n + 1))   [bit-length trick]
+     *   ratio        = totalSmfLockedInNFTs * 1e18 / smfTotalMinted  (0 if none minted)
+     *   ratio_mult   = 1e18 + nftRatioScale * ratio / 1e18
+     *   cost         = nftCostMin + nftCostBase * log_steps * ratio_mult / 1e18
+     */
+    function _nftMintCost() internal view returns (uint256 cost) {
+        uint256 effectiveN = nftCount > nftGrace ? nftCount - nftGrace : 0;
+
+        // floor(log2(effectiveN + 1)) via bit length
+        uint256 logSteps = 0;
+        uint256 v = effectiveN + 1;
+        while (v > 1) {
+            v >>= 1;
+            logSteps++;
+        }
+
+        uint256 ratioMult = 1e18;
+        if (smfTotalMinted > 0) {
+            uint256 ratio = totalSmfLockedInNFTs * 1e18 / smfTotalMinted;
+            ratioMult = 1e18 + nftRatioScale * ratio / 1e18;
+        }
+
+        cost = nftCostMin + nftCostBase * logSteps * ratioMult / 1e18;
     }
 
     // -------------------------------------------------------------------------
