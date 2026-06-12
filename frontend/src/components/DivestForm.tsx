@@ -32,6 +32,14 @@ export default function DivestForm({ tokenId }: Props) {
     query: { enabled: tokenId > 0 },
   })
 
+  const { data: reserve } = useReadContract({
+    address: CONTRACT_ADDRESS,
+    abi: SMARTFOLIO_ABI,
+    functionName: 'reserve',
+    args: [BigInt(tokenId)],
+    query: { enabled: tokenId > 0 },
+  })
+
   const { data: totalSupply } = useReadContract({
     address: CONTRACT_ADDRESS,
     abi: SMARTFOLIO_ABI,
@@ -56,8 +64,8 @@ export default function DivestForm({ tokenId }: Props) {
     useWaitForTransactionReceipt({ hash: txHash })
 
   let estimatedEth: bigint | null = null
-  if (isValidAmount && deployedEth !== undefined && totalSupply !== undefined && totalSupply > 0n) {
-    estimatedEth = (BigInt(parsedAmount) * deployedEth) / totalSupply
+  if (isValidAmount && deployedEth !== undefined && reserve !== undefined && totalSupply !== undefined && totalSupply > 0n) {
+    estimatedEth = (BigInt(parsedAmount) * (deployedEth + reserve)) / totalSupply
   }
 
   let minEthOut: bigint = 0n
@@ -130,7 +138,7 @@ export default function DivestForm({ tokenId }: Props) {
           className="input-money"
           style={{ width: '8rem' }}
         />
-        <p className="text-xs" style={{ color: 'rgba(255,255,255,0.25)' }}>Applied as minEthOut slippage guard</p>
+        <p className="text-xs" style={{ color: 'rgba(255,255,255,0.25)' }}>Applied as minEthOut slippage guard. Estimate excludes SMF bonding curve value.</p>
       </div>
 
       {estimatedEth !== null && (
