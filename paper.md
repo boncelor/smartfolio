@@ -126,7 +126,8 @@ In practice, accumulated dust across thousands of burns on a single token ID is 
 `burn()` is blocked when:
 - `portfolioActive[id]` is true — holders must use `divest()`.
 - `lpActive[id]` is true — holders must use `divestLP()`.
-- `isLeverageToken[id]` is true — holders must use `divestLeverage()`.
+
+Leverage tokens are not explicitly blocked by `burn()`. However, leverage tokens hold no ETH in `reserve[id]` — their backing is in Aave — so burning a leverage token returns 0 ETH. Holders must use `divestLeverage()` to recover their Aave collateral.
 
 ---
 
@@ -204,8 +205,10 @@ A Portfolio token is a Standard token whose ETH reserve is deployed into a mixed
 | `ERC20` | Uniswap V3 token swap | ERC20 held by proxy |
 | `AAVE` | Aave V3 collateral deposit | aWETH held by Aave (shared proxy account) |
 | `LP` | Uniswap V3 LP position | Position NFT held by proxy |
+| `SMF` | Buy SMF via bonding curve | SMF ERC20 held by proxy |
+| `STAKING` | (reserved — not yet supported, reverts) | — |
 
-A single portfolio can combine all three types in one basket.
+A single portfolio can combine ERC20, AAVE, LP, and SMF types in one basket. At least one SMF slice is required; the minimum SMF weight determines which other asset types are unlocked (see §5.2 tier gates).
 
 ### 5.2 Configuration
 
@@ -232,23 +235,24 @@ Weights across all slice types must sum to exactly 10,000 bps.
 1. Owner:  setPortfolioConfig(id, assets)                    — define basket
 2. Owner:  setDefaultAavePool(pool)                          — required if any AAVE slice
 3. User:   mint(alice, id, amount)                           — ETH → reserve[id]
-4. Keeper: deploy(id, erc20MinAmounts, lpSwapMin, lp0Min, lp1Min)
+4. Keeper: deploy(id, erc20MinAmounts, smfMinAmount, lpSwapMin, lp0Min, lp1Min)
                                                              — reserve ETH → basket
 5. Keeper: rebalance(id, instructions)                       — ERC20 slices only
 6. User:   divest(id, amount, minEthOut)                     — pro-rata basket → ETH
 ```
 
-After `deploy()`, `portfolioActive[id]` is set to `true` and `reserve[id]` is zeroed. The five-parameter signature separates slippage guards by slice type: `erc20MinAmounts` is an array covering ERC20 slices in order; the three LP parameters guard the V3 position mint.
+After `deploy()`, `portfolioActive[id]` is set to `true` and `reserve[id]` is zeroed. The six-parameter signature separates slippage guards by slice type: `erc20MinAmounts` is an array covering ERC20 slices in order; `smfMinAmount` is the minimum SMF expected from the bonding curve buy; the three LP parameters guard the V3 position mint.
 
 ### 5.4 Deploying
 
-The keeper calls `deploy(id, erc20MinAmounts, lpSwapAmountOutMin, lpAmount0Min, lpAmount1Min)`:
+The keeper calls `deploy(id, erc20MinAmounts, smfMinAmount, lpSwapAmountOutMin, lpAmount0Min, lpAmount1Min)`:
 
 1. The entire `reserve[id]` is wrapped to WETH.
 2. Assets are processed in order. The last asset receives all remaining WETH (no rounding dust).
 3. Per-slice dispatch:
    - **ERC20**: swaps the allocated WETH to `token` via Uniswap V3 using `erc20MinAmounts[i]`.
    - **AAVE**: deposits allocated WETH into Aave V3 via the shared proxy account (`defaultAavePool`). `portfolioAaveWeth[id]` records the deposited amount for per-ID accounting.
+   - **SMF**: unwraps WETH to ETH, then calls `buySMF{value: amountIn}(smfMinAmount)` on the SMF contract. The acquired SMF is held by the proxy and tracked in `portfolioSMFHoldings[id]`.
    - **LP**: swaps half the allocated WETH to `token` via the swap router (`lpSwapAmountOutMin`), then mints a Uniswap V3 position (`lpAmount0Min`, `lpAmount1Min`). The position NFT is held by the proxy. Any token amounts unused by the position manager (current price ratio mismatch) are unwrapped back to ETH and added to `reserve[id]` as leftover.
 4. `portfolioActive[id]` is set to `true`.
 
@@ -393,7 +397,7 @@ Both operations include on-chain LTV validation — the keeper's instruction is 
 
 ### 7.6 Emergency Deleverage
 
-If the Aave health factor falls below a configurable floor (`emergencyHealthFloor[id]`), any party (not just the keeper) can trigger `emergencyDeleverage`. This performs a full `leverDown` in a single transaction — withdrawing all available WETH, swapping to stable, and repaying all debt — regardless of the normal LTV target.
+If the Aave health factor falls below a configurable floor (`emergencyHealthFloor[id]`), the keeper or owner can trigger `emergencyDeleverage`. This performs a full `leverDown` in a single transaction — withdrawing all available WETH, swapping to stable, and repaying all debt — regardless of the normal LTV target.
 
 ### 7.7 Chainlink Price Feed
 
@@ -421,8 +425,8 @@ The NFT itself is redeemed as usual via `burn()`, returning ETH to the holder.
 
 ```
 User ──ETH──▶ buySMF()      ──SMF──▶ User
-User ──SMF──▶ mintNFT()     ──ETH──▶ Smartfolio.mintFunded()  ──ERC1155──▶ User
-User ──SMF──▶ addToNFT()    ──ETH──▶ Smartfolio.addReserve()  (no ERC1155 minted)
+User ──SMF──▶ mintNFT()     ──ETH──▶ Smartfolio.mintFundedNew()  ──ERC1155 (auto-ID)──▶ User
+User ──SMF──▶ addToNFT()    ──ETH──▶ Smartfolio.addReserve()     (no ERC1155 minted)
 User ──ERC1155──▶ burn()     ──ETH──▶ User
 ```
 
@@ -440,17 +444,16 @@ When SMF is burned the inverse curve is traversed: starting from the highest occ
 
 ### 8.3 Minting NFTs with SMF
 
-A user calls `mintNFT(id, nftAmount, maxSmfBurn)`:
+A user calls `mintNFT(maxSmfBurn)`:
 
-1. `ethNeeded = Smartfolio.mintCost(nftAmount)` — uses the ERC1155 tier pricing.
-2. `conversionFee = ethNeeded × conversionFeeBps / 10,000` — flat fee (default 1%, max 5%).
-3. `smfToBurn = _smfAmountForEth(ethNeeded + conversionFee)` — inverse curve traversal.
-4. Reverts if `smfToBurn > maxSmfBurn` (slippage guard).
-5. Burns `smfToBurn` SMF from the caller; decrement `smfTotalSupply`.
-6. Sends `conversionFee` to treasury (if set).
-7. Calls `Smartfolio.mintFunded{value: ethNeeded}(caller, id, nftAmount)` — mints ERC1155 and adds `ethNeeded` to `reserve[id]`.
+1. The NFT floor price is $10 USD, converted to ETH via Chainlink ETH/USD oracle: `ethNeeded = (10e18 × 1e8) / ethPrice`.
+2. `smfToBurn = _smfAmountForEth(ethNeeded)` — inverse curve traversal.
+3. Reverts if `smfToBurn > maxSmfBurn` (slippage guard).
+4. Burns `smfToBurn` SMF from the caller; decrements `smfTotalSupply`.
+5. Calls `Smartfolio.mintFundedNew{value: ethNeeded}(caller)` — auto-assigns a new token ID, mints 1 ERC1155, and adds `ethNeeded` to `reserve[id]`.
+6. Returns the newly assigned `id`.
 
-The conversion fee is the only cost beyond the NFT's backing value. It is taken from the ETH released by the burn before forwarding to Smartfolio.
+The NFT token ID is auto-assigned by the Smartfolio contract (`mintFundedNew`). There is no conversion fee — the entire ETH released by the burn flows into the NFT's reserve.
 
 ### 8.4 Topping Up a Reserve
 
@@ -465,9 +468,9 @@ No conversion fee applies to reserve top-ups.
 
 ### 8.5 Restricted Smartfolio Entry Points
 
-Two new entry points on the Smartfolio proxy are callable only by the registered SMF contract (`smfContract`):
+Two entry points on the Smartfolio proxy are callable only by the registered SMF contract (`smfContract`):
 
-- `mintFunded(address to, uint256 id, uint256 amount) payable` — mints ERC1155 without bonding curve price check; ETH comes directly from the SMF contract.
+- `mintFundedNew(address to) payable returns (uint256 id)` — auto-assigns the next token ID, mints 1 ERC1155 to `to`, and adds `msg.value` to `reserve[id]`. No bonding curve price check.
 - `addReserve(uint256 id) payable` — adds `msg.value` to `reserve[id]` without minting tokens.
 
 Both revert with `CallerNotSMFContract` if called by any other address. The SMF contract is registered via `setSMFContract(address)` (owner-only).
@@ -477,7 +480,8 @@ Both revert with `CallerNotSMFContract` if called by any other address. The SMF 
 | Function | Returns |
 |---|---|
 | `smfMintCost(amount)` | ETH cost to buy `amount` SMF |
-| `smfForNFT(id, nftAmount)` | `(smfRequired, feePaid)` — simulate `mintNFT` cost |
+| `smfBurnValue(amount)` | ETH received from selling `amount` SMF |
+| `smfForNFT()` | `(smfRequired, ethNeeded)` — simulate `mintNFT` cost at current oracle price |
 | `smfForReserve(ethAmount)` | `smfRequired` — simulate `addToNFT` cost |
 | `getTiers()` | Current SMF tier configuration |
 
@@ -497,8 +501,7 @@ Both revert with `CallerNotSMFContract` if called by any other address. The SMF 
 | Wrap safety | ERC20 wrapper rejects leverage, portfolio-active, and LP-active tokens at deposit |
 | Mutual exclusion | Each token ID is strictly one type. All three config setters (`setPortfolioConfig`, `setLPConfig`, `setLeverageConfig`) and both deploy calls (`deploy`, `deployLP`) reject cross-type combinations at the earliest possible point |
 | Shared Aave account | All AAVE slices and leverage tokens share one proxy-level Aave account. A leveraged position's debt contributes to the aggregate health factor. Portfolio AAVE slices alone hold no debt and cannot be liquidated; the risk materialises only when leverage tokens with outstanding debt coexist on the same proxy |
-| SMF entry point | `mintFunded` and `addReserve` on Smartfolio are restricted to the registered SMF contract via `CallerNotSMFContract`. No external party can inject ETH into a reserve or mint tokens at arbitrary prices |
-| SMF conversion fee | Capped at 5% (`MAX_CONVERSION_FEE_BPS = 500`). Default 1%. Owner-adjustable within cap |
+| SMF entry point | `mintFundedNew` and `addReserve` on Smartfolio are restricted to the registered SMF contract via `CallerNotSMFContract`. No external party can inject ETH into a reserve or mint tokens at arbitrary prices |
 
 ---
 
@@ -530,4 +533,4 @@ The only state transition that removes a type binding is a full exit: `divestLP`
 | **LP** | Uniswap V3 LP position NFT | Step-tier bonding curve | `divestLP()` | None |
 | **Leverage** | WETH collateral via Aave V3 | Step-tier bonding curve | `divestLeverage()` | None |
 | **ERC20 Wrapper** | Backed 1:1 by Standard ERC1155 | Market price | `unwrap()` then `burn()` | None (burn fee on underlying) |
-| **SMF** | ETH pool (independent bonding curve) | Step-tier bonding curve | N/A (burn SMF to get ETH indirectly via NFT) | 1% conversion fee on `mintNFT` (max 5%) |
+| **SMF** | ETH pool (independent bonding curve) | Step-tier bonding curve | `sellSMF()` — receive ETH directly; or `mintNFT()` to convert to ERC1155 | None |
