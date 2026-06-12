@@ -137,9 +137,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
+    const rpcUrl = process.env.ALCHEMY_API_KEY
+      ? `https://eth-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
+      : undefined
+
     const client = createPublicClient({
       chain: sepolia,
-      transport: http(),
+      transport: http(rpcUrl),
     })
 
     const [info, active] = await Promise.all([
@@ -158,7 +162,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ])
 
     const reserve  = parseFloat(formatEther(info.reserve)).toFixed(4)
-    const backing  = parseFloat(formatEther(info.backingPerToken / BigInt(1e18))).toFixed(6)
+    const backing  = parseFloat(formatEther(info.backingPerToken)).toFixed(6)
     const supply   = info.circulatingSupply.toString()
     const tier     = info.currentTierIndex.toString()
     const price    = parseFloat(formatEther(info.currentPrice)).toFixed(4)
