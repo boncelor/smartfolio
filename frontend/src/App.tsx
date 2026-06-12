@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { CONTRACT_ADDRESS } from './contracts'
 import Header from './components/Header'
 import InfoCard from './components/InfoCard'
@@ -32,6 +32,13 @@ const TAB_LABELS: Record<Tab, string> = {
   wrap:      'Wrap / Unwrap',
 }
 
+const TABS = Object.keys(TAB_LABELS) as Tab[]
+
+function tabFromHash(): Tab {
+  const hash = window.location.hash.slice(1) as Tab
+  return TABS.includes(hash) ? hash : 'smf'
+}
+
 function TokenIdInput({ tokenId, setTokenId }: { tokenId: number; setTokenId: (v: number) => void }) {
   return (
     <div className="flex items-center gap-4">
@@ -53,10 +60,18 @@ function TokenIdInput({ tokenId, setTokenId }: { tokenId: number; setTokenId: (v
 
 export default function App() {
   const [tokenId, setTokenId] = useState<number>(0)
-  const [activeTab, setActiveTab] = useState<Tab>('smf')
+  const [activeTab, setActiveTab] = useState<Tab>(tabFromHash)
+
+  useEffect(() => {
+    function onHashChange() {
+      setActiveTab(tabFromHash())
+    }
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
 
   function switchTab(tab: Tab) {
-    setActiveTab(tab)
+    window.location.hash = tab
     if (tab !== 'nft') setTokenId(tab === 'smf' ? 0 : 1)
     else setTokenId(0)
   }
