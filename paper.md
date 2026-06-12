@@ -4,17 +4,23 @@
 
 ## Abstract
 
-Smartfolio is an on-chain portfolio protocol built on Ethereum. Its primary instrument is the **Portfolio NFT** — an ERC1155 token whose reserve is deployed into a configurable basket of on-chain strategies. The fundamental user flow is:
+Smartfolio is an on-chain portfolio protocol built on Ethereum. It issues ERC1155 tokens representing two instrument types:
+
+- **Standard tokens** — ETH held in a per-ID reserve, redeemable via a bonding-curve burn with a quadratic exit fee.
+- **Portfolio tokens** — the primary instrument. Each Portfolio NFT holds a configurable basket of on-chain strategies: SMF (mandatory), ERC20 token positions, Uniswap V3 LP positions, and Aave V3 collateral deposits. Holders exit via `divest()` with no fee.
+
+The fundamental user flow is:
 
 ```
 ETH → buySMF() → SMF → mintNFT() → Portfolio NFT
                                           ↓ deploy()
-                              SMF slice + optional ERC20 / LP / AAVE slices
+                              SMF slice (mandatory ≥ 20%)
+                            + ERC20 / LP / AAVE slices (tier-gated)
 ```
 
-Users buy **SMF** (`SmartfolioERC20`) with ETH via a step-tier bonding curve. Burning SMF mints a Portfolio NFT — the ETH backing of the burned SMF becomes the NFT's reserve. The keeper then deploys that reserve into a basket: every portfolio must allocate at least 20% to SMF (buying it back via the bonding curve), ensuring SMF always has structural demand. Additional weight can be distributed across ERC20 token swaps (Uniswap V3), Aave V3 collateral deposits, and Uniswap V3 LP positions — each unlocked by carrying a higher SMF allocation.
+Users buy **SMF** (`SmartfolioERC20`) with ETH via a step-tier bonding curve. Burning SMF mints a Portfolio NFT — the ETH backing of the burned SMF becomes the NFT's reserve. The keeper then deploys that reserve into the configured basket. Every portfolio must allocate at least 20% to SMF, ensuring SMF always has structural demand from every deploy. Additional weight is distributed across ERC20 swaps (Uniswap V3), concentrated liquidity positions (Uniswap V3), and Aave V3 collateral — each unlocked by a higher SMF allocation tier.
 
-Beyond Portfolio NFTs the protocol also supports two specialised instruments: **LP tokens** (reserve deployed as a single concentrated Uniswap V3 position) and **Leverage tokens** (reserve held as WETH collateral on Aave V3). All instruments are optionally wrappable into standard ERC20 tokens via a factory, unlocking DeFi composability.
+Portfolio tokens are optionally wrappable into standard ERC20 tokens via a factory, unlocking DeFi composability.
 
 The protocol is deployed as a single UUPS upgradeable proxy backed by a delegatecall facet architecture, keeping each contract under the EVM's 24 KB bytecode limit while sharing a single storage and ETH context.
 
@@ -292,18 +298,46 @@ The keeper calls `deploy(id, erc20MinAmounts, smfMinAmount, lpSwapAmountOutMin, 
    - **LP**: swaps half the allocated WETH to `token` via the swap router (`lpSwapAmountOutMin`), then mints a Uniswap V3 position (`lpAmount0Min`, `lpAmount1Min`). The position NFT is held by the proxy. Any token amounts unused by the position manager (current price ratio mismatch) are unwrapped back to ETH and added to `reserve[id]` as leftover.
 4. `portfolioActive[id]` is set to `true`.
 
-### 5.6 Shared Aave Account (B2 Model)
+### 5.6 LP Slice Operations
 
-All AAVE slices across all portfolio IDs, plus all standalone Leverage tokens, share a single Aave account at the proxy address. This means:
+When a portfolio has an LP slice, two additional keeper operations are available:
+
+**Deploy LP slice** — `deploy()` handles the LP slice as part of the overall basket deploy. For the LP portion:
+1. The allocated WETH is partially swapped to `tokenB` via the swap router (`lpSwapAmountOutMin`).
+2. The remaining WETH and acquired `tokenB` are provided to `NonfungiblePositionManager.mint()` within the configured tick range. The position NFT is held by the proxy.
+3. Any tokens unused by the position manager (price ratio mismatch) are unwrapped back to ETH and added to `reserve[id]` as undeployed leftover.
+
+`tickLower` and `tickUpper` define the price range for the position. Full-range positions (`-887220` to `887220`) behave like Uniswap V2 and are simpler to manage; concentrated ranges earn higher fees but require active management.
+
+**Fee collection** — the keeper calls `collectFees(id)` periodically:
+1. `NonfungiblePositionManager.collect()` retrieves all accrued `tokensOwed`.
+2. Any `tokenB` fees are swapped to WETH via the swap router.
+3. Total WETH is unwrapped to ETH and added to `reserve[id]`, increasing the backing per token for all holders.
+
+### 5.7 AAVE Slice — Collateral and Future Leverage
+
+The AAVE slice is the protocol's collateral layer, designed in two phases:
+
+**Phase 1 (current): Collateral deposit**
+
+When the keeper deploys a portfolio with an AAVE slice, the allocated WETH is deposited into Aave V3 as collateral via the shared proxy account. `portfolioAaveWeth[id]` records the deposited amount for pro-rata withdrawal on divest. No borrowing occurs — the health factor is effectively infinite for collateral-only positions.
+
+On divest, `portfolioAaveWeth[id] × amount / supply` WETH is withdrawn from Aave and returned to the holder as ETH.
+
+**Phase 2 (planned): Keeper-driven borrowing**
+
+A future upgrade will allow the keeper to borrow stablecoins against the AAVE collateral and deploy that capital further — effectively running a leveraged position as one slice of the portfolio. The borrow/repay loop, LTV caps, and emergency deleverage will be implemented at the slice level, keeping the portfolio as the single instrument type.
+
+### 5.8 Shared Aave Account
+
+All AAVE slices across all portfolio IDs share a single Aave account at the proxy address. This means:
 
 - There is **one aggregate health factor** for the entire proxy's Aave position.
 - `portfolioAaveWeth[id]` tracks per-ID deposited WETH for proportional withdrawal, but does not isolate health risk.
-- A sufficiently large borrow on one leverage token will affect the health factor seen by all other IDs.
-- In a portfolio with no leverage tokens and no borrowed debt, the health factor is effectively infinite — AAVE slices in portfolios are collateral-only positions (no borrowing), so they cannot be liquidated in isolation.
+- In a portfolio with collateral-only AAVE slices (Phase 1) and no borrowed debt, the health factor is effectively infinite — these positions cannot be liquidated.
+- Once Phase 2 borrowing is introduced, debt from one portfolio's AAVE slice will affect the aggregate health factor seen by all other portfolios on the same proxy. This must be managed carefully.
 
-See Section 9 for the associated security note.
-
-### 5.7 Divest
+### 5.9 Divest
 
 A holder calls `divest(id, amount, minEthOut)`. The contract dispatches per slice type using a pre-computed `supply` snapshot (before the burn reduces it):
 
@@ -316,142 +350,15 @@ All WETH is unwrapped and combined with the proportional share of `reserve[id]` 
 
 No burn fee applies. When all tokens have been divested, `portfolioActive[id]` resets and the owner may reconfigure the basket.
 
-### 5.8 Rebalancing
+### 5.10 Rebalancing
 
 The keeper submits `RebalanceInstruction[]` — a set of sell/buy pairs computed off-chain against the ERC20 slice holdings. The contract executes each swap against Uniswap V3. Slippage tolerance is enforced globally via `slippageToleranceBps`. AAVE and LP slices are not rebalanced — their positions change only via `deploy` and `divest`.
 
 ---
 
-## 6. LP Investment
+## 6. SMF — Global ERC20 Token
 
 ### 6.1 Concept
-
-An LP token is a Standard token whose ETH reserve is deployed as concentrated liquidity into a Uniswap V3 pool via `NonfungiblePositionManager`. Rather than holding ERC20 assets directly, the protocol holds a Uniswap V3 position NFT. Holders receive a pro-rata share of the accrued trading fees in addition to their original principal.
-
-### 6.2 Configuration
-
-The owner configures the pool parameters before any minting begins:
-
-```
-setLPConfig(id, {
-  tokenB:    <paired ERC20 token address>,
-  poolFee:   3000,       // 0.3% fee tier
-  tickLower: -887220,    // full-range lower bound
-  tickUpper:  887220,    // full-range upper bound
-  swapFee:   3000,       // fee tier for WETH↔tokenB swap via swap router
-})
-```
-
-`tickLower` and `tickUpper` define the price range. Full-range positions (`-887220` to `887220`) behave like Uniswap V2 — simpler to manage but earning lower fees than concentrated positions.
-
-### 6.3 Lifecycle
-
-```
-1. Owner:  setLPConfig(id, config)              — configure pool and price range
-2. User:   mint(alice, id, amount)              — ETH → reserve[id]
-3. Keeper: deployLP(id, wethForSwap, ...)       — reserve ETH → WETH + tokenB → LP position
-4. Keeper: collectFees(id)                      — harvest trading fees → reserve[id]
-5. User:   divestLP(id, amount, minEthOut)      — remove proportional liquidity → ETH
-```
-
-### 6.4 Deploying
-
-The keeper calls `deployLP(id, wethForSwap, swapAmountOutMin, amount0Min, amount1Min)`:
-
-1. The entire `reserve[id]` is wrapped to WETH and `reserve[id]` is set to zero.
-2. `wethForSwap` WETH is swapped to `tokenB` via the swap router.
-3. The remaining WETH and the acquired `tokenB` are approved to the `NonfungiblePositionManager`.
-4. `NonfungiblePositionManager.mint()` is called with the configured tick range. The position NFT is held by the proxy.
-5. Any unused token amounts returned by the position manager (due to the current pool ratio) are unwrapped back to ETH and added to `reserve[id]` as a small undeployed leftover.
-6. `lpActive[id]` is set to `true`, `lpPositionId[id]` and `lpLiquidity[id]` are recorded.
-
-### 6.5 Fee Collection
-
-The keeper calls `collectFees(id)` periodically:
-
-1. `NonfungiblePositionManager.collect()` retrieves all accrued `tokensOwed` for the position.
-2. Any `tokenB` fees are swapped to WETH via the swap router.
-3. Total WETH is unwrapped to ETH and added to `reserve[id]`.
-
-This increases the ETH backing per token for all holders without requiring any user action.
-
-### 6.6 Divest
-
-A holder calls `divestLP(id, amount, minEthOut)`:
-
-1. The proportional liquidity share is computed: `liquidity × amount / totalSupply[id]`. The last holder receives all remaining liquidity to avoid dust.
-2. `NonfungiblePositionManager.decreaseLiquidity()` moves the principal tokens to `tokensOwed`.
-3. `NonfungiblePositionManager.collect()` retrieves the owed tokens (principal + any pending fees).
-4. Any `tokenB` received is swapped to WETH; all WETH is unwrapped to ETH.
-5. The holder's proportional share of `reserve[id]` (undeployed ETH from leftovers and collected fees) is added to the payout.
-6. The combined ETH is sent to the caller. Reverts if below `minEthOut`.
-7. `totalSupply[id]` and `globalTotalSupply` decrease by `amount`. When `totalSupply[id]` reaches zero, `lpActive[id]` is reset.
-
-No burn fee applies to LP divest.
-
----
-
-## 7. Leverage
-
-### 7.1 Concept
-
-A Leverage token uses Aave V3 as its reserve layer. Instead of ETH sitting idle in `reserve[id]`, minting cost is wrapped to WETH and deposited into Aave as collateral. A keeper monitors off-chain signals and adjusts the LTV position within a hard cap.
-
-### 7.2 Configuration
-
-```
-setLeverageConfig(id, {
-  aavePool:     <Aave V3 pool address>,
-  stableToken:  <USDC or other stable>,
-  targetLtvBps: 500,   // 5% target LTV
-  maxLtvBps:    1000,  // 10% hard cap
-})
-```
-
-`maxLtvBps` is capped at 1000 (10%). At 5% LTV against WETH (Aave liquidation threshold ~80%), the health factor is approximately 16 — effectively immune to liquidation even in severe drawdowns.
-
-### 7.3 Lifecycle
-
-```
-1. Owner:  setLeverageConfig(id, config)      — configure Aave pool and LTV bounds
-2. User:   mintLeverage(id, amount)           — ETH → WETH → Aave collateral
-3. Keeper: leverUp(id, stableToBorrow, ...)   — borrow stable → swap to WETH → add collateral
-4. Keeper: leverDown(id, wethToWithdraw, ...) — withdraw WETH → sell to stable → repay debt
-5. User:   divestLeverage(id, amount, min)    — withdraw pro-rata WETH → ETH
-```
-
-### 7.4 Minting
-
-`mintLeverage` prices tokens using the same step-tier bonding curve as Standard tokens. The ETH cost is wrapped to WETH and deposited into Aave. It does not go to `reserve[id]` — the reserve is Aave itself. `aaveCollateral[id]` tracks the deposited WETH.
-
-### 7.5 Keeper Operations
-
-**leverUp**: The keeper signals a bullish position. It borrows `stableToBorrow` from Aave against the existing collateral, swaps the stable to WETH via Uniswap, and re-deposits the WETH as additional collateral. The resulting LTV must not exceed `maxLtvBps`.
-
-**leverDown**: The keeper signals caution. It withdraws WETH from Aave, swaps to stable via Uniswap, and repays Aave debt. LTV decreases.
-
-Both operations include on-chain LTV validation — the keeper's instruction is rejected if it would breach the hard cap.
-
-### 7.6 Emergency Deleverage
-
-If the Aave health factor falls below a configurable floor (`emergencyHealthFloor[id]`), the keeper or owner can trigger `emergencyDeleverage`. This performs a full `leverDown` in a single transaction — withdrawing all available WETH, swapping to stable, and repaying all debt — regardless of the normal LTV target.
-
-### 7.7 Chainlink Price Feed
-
-An optional Chainlink ETH/USD feed can be registered per leverage token. When configured:
-- `getLeverageInfo` returns the current ETH price alongside collateral and debt figures.
-- Price staleness is validated against `priceMaxAge` — stale prices revert the query.
-- `emergencyDeleverage` enforces the price freshness check before execution.
-
-### 7.8 Divest
-
-`divestLeverage(id, amount, minEthOut)` withdraws a pro-rata share of `aaveCollateral[id]` from Aave, unwraps WETH to ETH, and sends it to the caller. No burn fee applies. The function reverts if `aaveDebt[id] > 0` — the keeper must repay all debt via `leverDown` before holders can exit.
-
----
-
-## 8. SMF — Global ERC20 Token
-
-### 8.1 Concept
 
 SMF (`SmartfolioERC20`) is a standalone ERC20 contract that acts as the primary liquidity layer for the protocol. Rather than paying ETH directly to mint ERC1155 NFTs, users first buy SMF with ETH via its own bonding curve. SMF can then be burned to:
 
@@ -467,7 +374,7 @@ User ──SMF──▶ addToNFT()    ──ETH──▶ Smartfolio.addReserve()
 User ──ERC1155──▶ burn()     ──ETH──▶ User
 ```
 
-### 8.2 SMF Bonding Curve
+### 6.2 SMF Bonding Curve
 
 SMF has its own independent step-tier bonding curve, configured separately from the ERC1155 curve via `setTiers()`. The curve is driven by `smfTotalSupply` — the current SMF in circulation — and is structurally identical to the ERC1155 curve:
 
@@ -479,7 +386,7 @@ Tier 1:  smfTotalSupply  100 –   999   →  price₁ per SMF
 
 When SMF is burned the inverse curve is traversed: starting from the highest occupied tier, tokens are redeemed at their original tier price until the required ETH is covered. This ensures the ETH released by a burn exactly equals the ETH that was paid in for those tokens.
 
-### 8.3 Minting NFTs with SMF
+### 6.3 Minting NFTs with SMF
 
 A user calls `mintNFT(maxSmfBurn)`:
 
@@ -492,7 +399,7 @@ A user calls `mintNFT(maxSmfBurn)`:
 
 The NFT token ID is auto-assigned by the Smartfolio contract (`mintFundedNew`). There is no conversion fee — the entire ETH released by the burn flows into the NFT's reserve.
 
-### 8.4 Topping Up a Reserve
+### 6.4 Topping Up a Reserve
 
 A user calls `addToNFT(id, ethAmount, maxSmfBurn)`:
 
@@ -503,7 +410,7 @@ A user calls `addToNFT(id, ethAmount, maxSmfBurn)`:
 
 No conversion fee applies to reserve top-ups.
 
-### 8.5 Restricted Smartfolio Entry Points
+### 6.5 Restricted Smartfolio Entry Points
 
 Two entry points on the Smartfolio proxy are callable only by the registered SMF contract (`smfContract`):
 
@@ -512,7 +419,7 @@ Two entry points on the Smartfolio proxy are callable only by the registered SMF
 
 Both revert with `CallerNotSMFContract` if called by any other address. The SMF contract is registered via `setSMFContract(address)` (owner-only).
 
-### 8.6 Simulation Views
+### 6.6 Simulation Views
 
 | Function | Returns |
 |---|---|
@@ -524,50 +431,29 @@ Both revert with `CallerNotSMFContract` if called by any other address. The SMF 
 
 ---
 
-## 9. Security Properties
+## 7. Security Properties
 
 | Property | Mechanism |
 |---|---|
 | Reentrancy | Inline reentrancy guard on all mutating entry points; slot explicitly reset in assembly after delegatecall |
 | Pausability | `whenNotPaused` on all user-facing mutating functions |
-| Access control | Owner-only admin setters; keeper-only rebalance, lever, deployLP, and collectFees operations |
+| Access control | Owner-only admin setters; keeper-only `deploy`, `rebalance`, and `collectFees` operations |
 | Upgrade safety | UUPS — only `_authorizeUpgrade` (owner) can approve implementation upgrades |
 | Storage safety | All state in `SmartfolioBase`; OpenZeppelin state uses EIP-7201 namespaced slots, no collision possible |
-| Slippage | `minEthOut` / `amountsOutMinimum` on all Uniswap interactions |
-| LTV cap | Hard-coded 10% ceiling on leverage regardless of keeper instruction |
-| Wrap safety | ERC20 wrapper rejects leverage, portfolio-active, and LP-active tokens at deposit |
-| Mutual exclusion | Each token ID is strictly one type. All three config setters (`setPortfolioConfig`, `setLPConfig`, `setLeverageConfig`) and both deploy calls (`deploy`, `deployLP`) reject cross-type combinations at the earliest possible point |
-| Shared Aave account | All AAVE slices and leverage tokens share one proxy-level Aave account. A leveraged position's debt contributes to the aggregate health factor. Portfolio AAVE slices alone hold no debt and cannot be liquidated; the risk materialises only when leverage tokens with outstanding debt coexist on the same proxy |
+| Slippage | `minEthOut` / `amountsOutMinimum` on all Uniswap interactions; `smfMinAmount` on bonding curve buys |
+| Wrap safety | ERC20 wrapper rejects portfolio-active tokens at deposit — only Standard tokens are wrappable |
+| Instrument exclusion | Once `setPortfolioConfig` is called for a token ID, the token is a Portfolio instrument. `portfolioActive[id]` is set on deploy and cleared only when all holders have exited. A token cannot transition between Standard and Portfolio |
+| Shared Aave account | All AAVE slices across all portfolio IDs share one proxy-level Aave account. Phase 1 (collateral-only) positions hold no debt and cannot be liquidated. Phase 2 borrowing (planned) will require careful aggregate health factor management across all portfolios on the proxy |
 | SMF entry point | `mintFundedNew` and `addReserve` on Smartfolio are restricted to the registered SMF contract via `CallerNotSMFContract`. No external party can inject ETH into a reserve or mint tokens at arbitrary prices |
 
 ---
 
-## 10. Token Type Mutual Exclusion
+## 8. Instrument Types
 
-Each token ID is permanently bound to exactly one instrument type. The constraint is enforced at the config setter level and again at the deploy call, so misconfiguration is rejected before any ETH is committed.
+Smartfolio issues two instrument types. Each token ID is bound to exactly one type, determined by whether `setPortfolioConfig` has been called. Once a portfolio is configured and deployed, `portfolioActive[id]` is set and the token cannot be reconfigured until all holders have divested.
 
-| Attempted combination | Blocked by |
-|---|---|
-| `setPortfolioConfig` on a leverage token | `isLeverageToken[id]` → `IncompatibleTokenType` |
-| `setPortfolioConfig` while LP active | `lpActive[id]` → `LiquidityAlreadyActive` |
-| `setLPConfig` on a leverage token | `isLeverageToken[id]` → `IncompatibleTokenType` |
-| `setLPConfig` while portfolio active | `portfolioActive[id]` → `PortfolioActive` |
-| `setLeverageConfig` while portfolio active | `portfolioActive[id]` → `PortfolioActive` |
-| `setLeverageConfig` while LP active | `lpActive[id]` → `LiquidityAlreadyActive` |
-| `deploy` (portfolio) while LP active | `lpActive[id]` → `LiquidityAlreadyActive` |
-| `deployLP` on a leverage token | `isLeverageToken[id]` → `IncompatibleTokenType` |
-
-The only state transition that removes a type binding is a full exit: `divestLP` or `divest` with the last token burns resets `lpActive[id]` / `portfolioActive[id]`. `isLeverageToken[id]` is permanent and cannot be cleared once set.
-
----
-
-## 11. Token Type Summary
-
-| Type | Reserve | Pricing | Exit | Fee |
+| Type | Reserve | Entry | Exit | Fee |
 |---|---|---|---|---|
-| **Standard** | ETH in `reserve[id]` | Step-tier bonding curve | `burn()` | Quadratic (0–80%) |
-| **Portfolio** | Mixed: ERC20 (Uniswap V3), AAVE (Aave V3 collateral), LP (Uniswap V3 position) | Step-tier bonding curve | `divest()` | None |
-| **LP** | Uniswap V3 LP position NFT | Step-tier bonding curve | `divestLP()` | None |
-| **Leverage** | WETH collateral via Aave V3 | Step-tier bonding curve | `divestLeverage()` | None |
-| **ERC20 Wrapper** | Backed 1:1 by Standard ERC1155 | Market price | `unwrap()` then `burn()` | None (burn fee on underlying) |
-| **SMF** | ETH pool (independent bonding curve) | Step-tier bonding curve | `sellSMF()` — receive ETH directly; or `mintNFT()` to convert to ERC1155 | None |
+| **Standard** | ETH in `reserve[id]` | `mint()` with ETH | `burn()` | Quadratic exit fee (0–80%) |
+| **Portfolio** | SMF + ERC20 (Uniswap V3) + LP (Uniswap V3) + AAVE (Aave V3) | `mintNFT()` via SMF | `divest()` | None |
+| **SMF** | ETH pool (independent bonding curve) | `buySMF()` with ETH | `sellSMF()` for ETH; or `mintNFT()` to convert into a Portfolio NFT | None |
