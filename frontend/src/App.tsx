@@ -1,34 +1,23 @@
 import { useState, useEffect } from 'react'
 import { CONTRACT_ADDRESS } from './contracts'
 import Header from './components/Header'
-import InfoCard from './components/InfoCard'
-import BurnForm from './components/BurnForm'
-import DivestForm from './components/DivestForm'
-import LeverageInfoCard from './components/LeverageInfoCard'
-import MintLeverageForm from './components/MintLeverageForm'
-import DivestLeverageForm from './components/DivestLeverageForm'
-import KeeperPanel from './components/KeeperPanel'
-import LPInfoCard from './components/LPInfoCard'
-import DivestLPForm from './components/DivestLPForm'
-import LPKeeperPanel from './components/LPKeeperPanel'
 import SMFPanel from './components/SMFPanel'
 import NFTList from './components/NFTList'
 import MintNewForm from './components/MintNewForm'
+import InfoCard from './components/InfoCard'
+import BurnForm from './components/BurnForm'
 import PortfolioInfoCard from './components/PortfolioInfoCard'
-import PortfolioConfigForm from './components/PortfolioConfigForm'
+import DivestForm from './components/DivestForm'
 import PortfolioKeeperPanel from './components/PortfolioKeeperPanel'
+import PortfolioConfigForm from './components/PortfolioConfigForm'
 
-type Tab = 'smf' | 'nft' | 'portfolio' | 'divest' | 'leverage' | 'lp'
+type Tab = 'smf' | 'nft'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 const TAB_LABELS: Record<Tab, string> = {
-  smf:       'SMF',
-  nft:       'NFT',
-  portfolio: 'Portfolio',
-  divest:    'Divest',
-  leverage:  'Leverage',
-  lp:        'LP',
+  smf: 'SMF',
+  nft: 'NFT',
 }
 
 const TABS = Object.keys(TAB_LABELS) as Tab[]
@@ -36,25 +25,6 @@ const TABS = Object.keys(TAB_LABELS) as Tab[]
 function tabFromHash(): Tab {
   const hash = window.location.hash.slice(1) as Tab
   return TABS.includes(hash) ? hash : 'smf'
-}
-
-function TokenIdInput({ tokenId, setTokenId }: { tokenId: number; setTokenId: (v: number) => void }) {
-  return (
-    <div className="flex items-center gap-4">
-      <label htmlFor="token-id" className="stat-label whitespace-nowrap" style={{ fontSize: '0.8125rem' }}>
-        Token ID
-      </label>
-      <input
-        id="token-id"
-        type="number"
-        min={1}
-        value={tokenId}
-        onChange={(e) => setTokenId(Math.max(1, parseInt(e.target.value) || 1))}
-        className="input-money"
-        style={{ width: '7rem' }}
-      />
-    </div>
-  )
 }
 
 export default function App() {
@@ -71,8 +41,7 @@ export default function App() {
 
   function switchTab(tab: Tab) {
     window.location.hash = tab
-    if (tab !== 'nft') setTokenId(tab === 'smf' ? 0 : 1)
-    else setTokenId(0)
+    setTokenId(0)
   }
 
   const isZeroAddress = CONTRACT_ADDRESS === ZERO_ADDRESS
@@ -103,13 +72,13 @@ export default function App() {
 
           {/* Tab bar */}
           <div className="flex border-b" style={{ borderColor: 'rgba(212,175,55,0.15)' }}>
-            {(Object.keys(TAB_LABELS) as Tab[]).map((tab) => (
+            {TABS.map((tab) => (
               <button
                 key={tab}
                 onClick={() => switchTab(tab)}
                 className={`px-6 py-3 text-sm font-semibold transition-colors ${
                   activeTab === tab
-                    ? (tab === 'leverage' || tab === 'lp' || tab === 'smf' || tab === 'portfolio') ? 'tab-active-gold' : 'tab-active-green'
+                    ? tab === 'smf' ? 'tab-active-gold' : 'tab-active-green'
                     : 'tab-inactive'
                 }`}
               >
@@ -118,16 +87,20 @@ export default function App() {
             ))}
           </div>
 
-          {/* Tab content */}
+          {/* SMF tab */}
           {activeTab === 'smf' && <SMFPanel />}
+
+          {/* NFT tab */}
           {activeTab === 'nft' && (
             <div className="space-y-4">
               {tokenId === 0 ? (
+                /* List view */
                 <>
                   <NFTList onSelect={(id) => setTokenId(id)} />
                   <MintNewForm />
                 </>
               ) : (
+                /* Token detail view */
                 <>
                   <button
                     onClick={() => setTokenId(0)}
@@ -139,47 +112,34 @@ export default function App() {
                     </svg>
                     All NFTs
                   </button>
-                  <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
+
+                  <div className="flex items-center gap-4">
+                    <label className="stat-label whitespace-nowrap" style={{ fontSize: '0.8125rem' }}>
+                      Token ID
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={tokenId}
+                      onChange={(e) => setTokenId(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="input-money"
+                      style={{ width: '7rem' }}
+                    />
+                  </div>
+
                   <InfoCard tokenId={tokenId} />
                   <BurnForm tokenId={tokenId} />
+                  <PortfolioInfoCard tokenId={tokenId} />
+                  <DivestForm tokenId={tokenId} />
+                  <PortfolioKeeperPanel tokenId={tokenId} />
+                  <PortfolioConfigForm tokenId={tokenId} />
                 </>
               )}
             </div>
           )}
-          {activeTab === 'portfolio' && (
-            <div className="space-y-4">
-              <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
-              <PortfolioInfoCard tokenId={tokenId} />
-              <DivestForm tokenId={tokenId} />
-              <PortfolioKeeperPanel tokenId={tokenId} />
-              <PortfolioConfigForm tokenId={tokenId} />
-            </div>
-          )}
-          {activeTab === 'divest' && (
-            <div className="space-y-4">
-              <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
-              <DivestForm tokenId={tokenId} />
-            </div>
-          )}
-          {activeTab === 'leverage' && (
-            <div className="space-y-4">
-              <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
-              <LeverageInfoCard tokenId={tokenId} />
-              <MintLeverageForm tokenId={tokenId} />
-              <DivestLeverageForm tokenId={tokenId} />
-              <KeeperPanel tokenId={tokenId} />
-            </div>
-          )}
-          {activeTab === 'lp' && (
-            <div className="space-y-4">
-              <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
-              <LPInfoCard tokenId={tokenId} />
-              <DivestLPForm tokenId={tokenId} />
-              <LPKeeperPanel tokenId={tokenId} />
-            </div>
-          )}
         </div>
       </main>
+
       <footer
         className="px-4 py-5 text-center text-xs leading-relaxed"
         style={{
