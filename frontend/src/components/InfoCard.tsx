@@ -108,7 +108,7 @@ export default function InfoCard({ tokenId }: Props) {
         </div>
         <div>
           <p className="stat-label">Backing / Token</p>
-          <p className="stat-value">{formatEther(info.backingPerToken / BigInt(1e18))} ETH</p>
+          <p className="stat-value">{formatEther(info.backingPerToken / 10n ** 18n)} ETH</p>
         </div>
       </div>
 
