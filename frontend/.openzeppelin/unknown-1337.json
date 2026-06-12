@@ -1,0 +1,504 @@
+{
+  "manifestVersion": "3.2",
+  "proxies": [
+    {
+      "address": "0x9FBDa871d559710256a2502A2517b794B482Db40",
+      "txHash": "0x884a210749749905b4a22c8ff5ad474fb02a9f463a5e16f089b11a47c8d6390e",
+      "kind": "uups"
+    }
+  ],
+  "impls": {
+    "ca6f3c148428030bb1df85d9cdde27c874fc01166db70d4c64f45c4a06ffff8a": {
+      "address": "0x8f0483125FCb9aaAEFA9209D8E9d7b9C8B9Fb90F",
+      "txHash": "0xd8be559257e533331ba1583c55548899506100f55ea934e9bf350b96e2b1e049",
+      "layout": {
+        "solcVersion": "0.8.24",
+        "storage": [
+          {
+            "contract": "SmartfolioBase",
+            "label": "_reentrancyStatus",
+            "type": "t_uint256",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:246"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "_tiers",
+            "type": "t_array(t_struct(TierConfig)12413_storage)dyn_storage",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:261"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "totalMinted",
+            "type": "t_mapping(t_uint256,t_uint256)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:262"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "totalSupply",
+            "type": "t_mapping(t_uint256,t_uint256)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:263"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "reserve",
+            "type": "t_mapping(t_uint256,t_uint256)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:264"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "globalTotalMinted",
+            "type": "t_uint256",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:265"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "globalTotalSupply",
+            "type": "t_uint256",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:266"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "maxBurnFeeRate",
+            "type": "t_uint256",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:268"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "treasury",
+            "type": "t_address",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:269"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "_portfolioConfig",
+            "type": "t_mapping(t_uint256,t_array(t_struct(PortfolioAsset)12455_storage)dyn_storage)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:275"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "portfolioActive",
+            "type": "t_mapping(t_uint256,t_bool)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:276"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "portfolioHoldings",
+            "type": "t_mapping(t_uint256,t_mapping(t_address,t_uint256))",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:277"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "deployedEth",
+            "type": "t_mapping(t_uint256,t_uint256)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:278"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "keeper",
+            "type": "t_address",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:279"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "swapRouter",
+            "type": "t_contract(ISwapRouter)9720",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:280"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "weth",
+            "type": "t_contract(IWETH9)11938",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:281"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "slippageToleranceBps",
+            "type": "t_uint16",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:282"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "defaultAavePool",
+            "type": "t_address",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:289"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "portfolioAaveWeth",
+            "type": "t_mapping(t_uint256,t_uint256)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:292"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "portfolioLpPositionId",
+            "type": "t_mapping(t_uint256,t_uint256)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:298"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "portfolioLpLiquidity",
+            "type": "t_mapping(t_uint256,t_uint128)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:299"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "portfolioLpWethIsToken0",
+            "type": "t_mapping(t_uint256,t_bool)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:300"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "isLeverageToken",
+            "type": "t_mapping(t_uint256,t_bool)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:306"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "leverageConfig",
+            "type": "t_mapping(t_uint256,t_struct(LeverageConfig)12477_storage)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:307"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "aaveCollateral",
+            "type": "t_mapping(t_uint256,t_uint256)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:308"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "aaveDebt",
+            "type": "t_mapping(t_uint256,t_uint256)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:309"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "ethUsdFeed",
+            "type": "t_mapping(t_uint256,t_address)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:312"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "emergencyHealthFloor",
+            "type": "t_mapping(t_uint256,t_uint256)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:316"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "priceMaxAge",
+            "type": "t_uint256",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:319"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "lpConfig",
+            "type": "t_mapping(t_uint256,t_struct(LPConfig)12510_storage)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:325"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "lpPositionId",
+            "type": "t_mapping(t_uint256,t_uint256)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:326"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "lpLiquidity",
+            "type": "t_mapping(t_uint256,t_uint128)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:327"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "lpActive",
+            "type": "t_mapping(t_uint256,t_bool)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:328"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "lpWethIsToken0",
+            "type": "t_mapping(t_uint256,t_bool)",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:329"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "positionManager",
+            "type": "t_address",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:330"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "treasuryFacet",
+            "type": "t_address",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:336"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "marketFacet",
+            "type": "t_address",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:337"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "creditMarketFacet",
+            "type": "t_address",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:338"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "liquidityMarketFacet",
+            "type": "t_address",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:339"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "smfContract",
+            "type": "t_address",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:345"
+          },
+          {
+            "contract": "SmartfolioBase",
+            "label": "nextTokenId",
+            "type": "t_uint256",
+            "src": "../frontend/project:/contracts/SmartfolioBase.sol:348"
+          }
+        ],
+        "types": {
+          "t_bool": {
+            "label": "bool"
+          },
+          "t_address": {
+            "label": "address"
+          },
+          "t_mapping(t_uint256,t_mapping(t_address,t_uint256))": {
+            "label": "mapping(uint256 => mapping(address => uint256))"
+          },
+          "t_uint256": {
+            "label": "uint256"
+          },
+          "t_mapping(t_address,t_uint256)": {
+            "label": "mapping(address => uint256)"
+          },
+          "t_mapping(t_address,t_mapping(t_address,t_bool))": {
+            "label": "mapping(address => mapping(address => bool))"
+          },
+          "t_mapping(t_address,t_bool)": {
+            "label": "mapping(address => bool)"
+          },
+          "t_string_storage": {
+            "label": "string"
+          },
+          "t_uint64": {
+            "label": "uint64"
+          },
+          "t_array(t_struct(TierConfig)12413_storage)dyn_storage": {
+            "label": "struct SmartfolioBase.TierConfig[]"
+          },
+          "t_struct(TierConfig)12413_storage": {
+            "label": "struct SmartfolioBase.TierConfig",
+            "members": [
+              {
+                "label": "threshold",
+                "type": "t_uint128"
+              },
+              {
+                "label": "pricePerToken",
+                "type": "t_uint128"
+              }
+            ]
+          },
+          "t_uint128": {
+            "label": "uint128"
+          },
+          "t_mapping(t_uint256,t_uint256)": {
+            "label": "mapping(uint256 => uint256)"
+          },
+          "t_mapping(t_uint256,t_array(t_struct(PortfolioAsset)12455_storage)dyn_storage)": {
+            "label": "mapping(uint256 => struct SmartfolioBase.PortfolioAsset[])"
+          },
+          "t_array(t_struct(PortfolioAsset)12455_storage)dyn_storage": {
+            "label": "struct SmartfolioBase.PortfolioAsset[]"
+          },
+          "t_struct(PortfolioAsset)12455_storage": {
+            "label": "struct SmartfolioBase.PortfolioAsset",
+            "members": [
+              {
+                "label": "assetType",
+                "type": "t_enum(AssetType)12408"
+              },
+              {
+                "label": "token",
+                "type": "t_address"
+              },
+              {
+                "label": "weightBps",
+                "type": "t_uint16"
+              },
+              {
+                "label": "poolFee",
+                "type": "t_uint24"
+              },
+              {
+                "label": "swapFee",
+                "type": "t_uint24"
+              },
+              {
+                "label": "tickLower",
+                "type": "t_int24"
+              },
+              {
+                "label": "tickUpper",
+                "type": "t_int24"
+              },
+              {
+                "label": "swapPath",
+                "type": "t_bytes_storage"
+              },
+              {
+                "label": "sellSwapPath",
+                "type": "t_bytes_storage"
+              }
+            ]
+          },
+          "t_enum(AssetType)12408": {
+            "label": "enum SmartfolioBase.AssetType",
+            "members": [
+              "ERC20",
+              "AAVE",
+              "LP"
+            ]
+          },
+          "t_uint16": {
+            "label": "uint16"
+          },
+          "t_uint24": {
+            "label": "uint24"
+          },
+          "t_int24": {
+            "label": "int24"
+          },
+          "t_bytes_storage": {
+            "label": "bytes"
+          },
+          "t_mapping(t_uint256,t_bool)": {
+            "label": "mapping(uint256 => bool)"
+          },
+          "t_contract(ISwapRouter)9720": {
+            "label": "contract ISwapRouter"
+          },
+          "t_contract(IWETH9)11938": {
+            "label": "contract IWETH9"
+          },
+          "t_mapping(t_uint256,t_uint128)": {
+            "label": "mapping(uint256 => uint128)"
+          },
+          "t_mapping(t_uint256,t_struct(LeverageConfig)12477_storage)": {
+            "label": "mapping(uint256 => struct SmartfolioBase.LeverageConfig)"
+          },
+          "t_struct(LeverageConfig)12477_storage": {
+            "label": "struct SmartfolioBase.LeverageConfig",
+            "members": [
+              {
+                "label": "aavePool",
+                "type": "t_address"
+              },
+              {
+                "label": "stableToken",
+                "type": "t_address"
+              },
+              {
+                "label": "targetLtvBps",
+                "type": "t_uint16"
+              },
+              {
+                "label": "maxLtvBps",
+                "type": "t_uint16"
+              }
+            ]
+          },
+          "t_mapping(t_uint256,t_address)": {
+            "label": "mapping(uint256 => address)"
+          },
+          "t_mapping(t_uint256,t_struct(LPConfig)12510_storage)": {
+            "label": "mapping(uint256 => struct SmartfolioBase.LPConfig)"
+          },
+          "t_struct(LPConfig)12510_storage": {
+            "label": "struct SmartfolioBase.LPConfig",
+            "members": [
+              {
+                "label": "tokenB",
+                "type": "t_address"
+              },
+              {
+                "label": "poolFee",
+                "type": "t_uint24"
+              },
+              {
+                "label": "tickLower",
+                "type": "t_int24"
+              },
+              {
+                "label": "tickUpper",
+                "type": "t_int24"
+              },
+              {
+                "label": "swapFee",
+                "type": "t_uint24"
+              }
+            ]
+          }
+        },
+        "namespaces": {
+          "erc7201:openzeppelin.storage.Pausable": [
+            {
+              "contract": "PausableUpgradeable",
+              "label": "_paused",
+              "type": "t_bool",
+              "src": "../frontend/@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol:21"
+            }
+          ],
+          "erc7201:openzeppelin.storage.Ownable": [
+            {
+              "contract": "OwnableUpgradeable",
+              "label": "_owner",
+              "type": "t_address",
+              "src": "../frontend/@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol:24"
+            }
+          ],
+          "erc7201:openzeppelin.storage.ERC1155": [
+            {
+              "contract": "ERC1155Upgradeable",
+              "label": "_balances",
+              "type": "t_mapping(t_uint256,t_mapping(t_address,t_uint256))",
+              "src": "../frontend/@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol:27"
+            },
+            {
+              "contract": "ERC1155Upgradeable",
+              "label": "_operatorApprovals",
+              "type": "t_mapping(t_address,t_mapping(t_address,t_bool))",
+              "src": "../frontend/@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol:29"
+            },
+            {
+              "contract": "ERC1155Upgradeable",
+              "label": "_uri",
+              "type": "t_string_storage",
+              "src": "../frontend/@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol:32"
+            }
+          ],
+          "erc7201:openzeppelin.storage.Initializable": [
+            {
+              "contract": "Initializable",
+              "label": "_initialized",
+              "type": "t_uint64",
+              "src": "../frontend/@openzeppelin/contracts/proxy/utils/Initializable.sol:69"
+            },
+            {
+              "contract": "Initializable",
+              "label": "_initializing",
+              "type": "t_bool",
+              "src": "../frontend/@openzeppelin/contracts/proxy/utils/Initializable.sol:73"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

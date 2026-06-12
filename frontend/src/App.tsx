@@ -14,18 +14,22 @@ import DivestLPForm from './components/DivestLPForm'
 import SMFPanel from './components/SMFPanel'
 import NFTList from './components/NFTList'
 import MintNewForm from './components/MintNewForm'
+import PortfolioInfoCard from './components/PortfolioInfoCard'
+import PortfolioConfigForm from './components/PortfolioConfigForm'
+import PortfolioKeeperPanel from './components/PortfolioKeeperPanel'
 
-type Tab = 'smf' | 'nft' | 'divest' | 'leverage' | 'lp' | 'wrap'
+type Tab = 'smf' | 'nft' | 'portfolio' | 'divest' | 'leverage' | 'lp' | 'wrap'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 const TAB_LABELS: Record<Tab, string> = {
-  smf:      'SMF',
-  nft:      'NFT',
-  divest:   'Divest',
-  leverage: 'Leverage',
-  lp:       'LP',
-  wrap:     'Wrap / Unwrap',
+  smf:       'SMF',
+  nft:       'NFT',
+  portfolio: 'Portfolio',
+  divest:    'Divest',
+  leverage:  'Leverage',
+  lp:        'LP',
+  wrap:      'Wrap / Unwrap',
 }
 
 function TokenIdInput({ tokenId, setTokenId }: { tokenId: number; setTokenId: (v: number) => void }) {
@@ -91,7 +95,7 @@ export default function App() {
                 onClick={() => switchTab(tab)}
                 className={`px-6 py-3 text-sm font-semibold transition-colors ${
                   activeTab === tab
-                    ? (tab === 'leverage' || tab === 'lp' || tab === 'smf') ? 'tab-active-gold' : 'tab-active-green'
+                    ? (tab === 'leverage' || tab === 'lp' || tab === 'smf' || tab === 'portfolio') ? 'tab-active-gold' : 'tab-active-green'
                     : 'tab-inactive'
                 }`}
               >
@@ -126,6 +130,15 @@ export default function App() {
                   <BurnForm tokenId={tokenId} />
                 </>
               )}
+            </div>
+          )}
+          {activeTab === 'portfolio' && (
+            <div className="space-y-4">
+              <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
+              <PortfolioInfoCard tokenId={tokenId} />
+              <DivestForm tokenId={tokenId} />
+              <PortfolioKeeperPanel tokenId={tokenId} />
+              <PortfolioConfigForm tokenId={tokenId} />
             </div>
           )}
           {activeTab === 'divest' && (
