@@ -20,8 +20,6 @@ ETH → buySMF() → SMF → mintNFT() → Portfolio NFT
 
 Users buy **SMF** (`SmartfolioERC20`) with ETH via a step-tier bonding curve. Burning SMF mints a Portfolio NFT — the ETH backing of the burned SMF becomes the NFT's reserve. The keeper then deploys that reserve into the configured basket. Every portfolio must allocate at least 20% to SMF, ensuring SMF always has structural demand from every deploy. Additional weight is distributed across ERC20 swaps (Uniswap V3), concentrated liquidity positions (Uniswap V3), and Aave V3 collateral — each unlocked by a higher SMF allocation tier.
 
-Portfolio tokens are optionally wrappable into standard ERC20 tokens via a factory, unlocking DeFi composability.
-
 The protocol is deployed as a single UUPS upgradeable proxy backed by a delegatecall facet architecture, keeping each contract under the EVM's 24 KB bytecode limit while sharing a single storage and ETH context.
 
 ---
@@ -145,72 +143,9 @@ Leverage tokens are not explicitly blocked by `burn()`. However, leverage tokens
 
 ---
 
-## 4. ERC20 Wrapping
+## 4. Portfolio Investment
 
-### 4.1 Motivation
-
-ERC1155 tokens have limited native support in DeFi — most DEXes, lending protocols, and wallets are built for ERC20. Smartfolio provides a factory to deploy thin ERC20 wrappers that represent ERC1155 tokens 1:1, enabling composability without changing the core protocol.
-
-### 4.2 Architecture
-
-`SmartfolioTokenFactory` is an owner-controlled factory that deploys one `SmartfolioToken` (ERC20) per token ID. Each wrapper is bound to a specific `(proxy address, token ID)` pair and is immutable after deployment.
-
-```
-factory.deploy(id, "Smartfolio Fund 1", "SF1")
-    └─ deploys SmartfolioToken(proxy, id, name, symbol)
-    └─ records wrappers[id] = address
-```
-
-One wrapper per token ID is enforced — the factory reverts on duplicate deployment.
-
-### 4.3 Wrapping
-
-A user wraps by approving the wrapper as an ERC1155 operator, then calling `wrap(amount)`. Alternatively, they can call `safeTransferFrom` directly on the ERC1155 contract targeting the wrapper address — both paths produce the same result.
-
-```
-sf.setApprovalForAll(wrapperAddress, true)
-wrapper.wrap(amount)
-    └─ sf.safeTransferFrom(user → wrapper, id, amount)
-           └─ onERC1155Received → ERC20._mint(user, amount)
-```
-
-ERC20 tokens are minted 1:1 to the depositor. The ERC1155 tokens are held by the wrapper contract.
-
-### 4.4 Unwrapping
-
-```
-wrapper.unwrap(amount)
-    └─ ERC20._burn(user, amount)
-    └─ sf.safeTransferFrom(wrapper → user, id, amount)
-```
-
-The user receives their ERC1155 tokens back. No additional approval is required.
-
-### 4.5 Safety Guards
-
-The wrapper rejects deposits for three token types at the `onERC1155Received` level — covering both the `wrap()` path and direct `safeTransferFrom`:
-
-- **Leverage tokens** (`isLeverageToken[id] == true`): their ETH is in Aave, not in `reserve[]`. Redemption requires `divestLeverage()`.
-- **Portfolio-active tokens** (`portfolioActive[id] == true`): their reserve is deployed into an ERC20 basket. Redemption requires `divest()`.
-- **LP-active tokens** (`lpActive[id] == true`): their reserve is in a Uniswap V3 LP position. Redemption requires `divestLP()`.
-
-Only Standard bonding-curve tokens — where `burn()` cleanly returns ETH from `reserve[]` — are wrappable.
-
-### 4.6 Composability
-
-Once wrapped, the ERC20 token is a standard fungible token and can be:
-- Listed on any ERC20 DEX (Uniswap, Curve, etc.)
-- Used as collateral on lending protocols
-- Held in any ERC20-compatible wallet or vault
-- Transferred freely peer-to-peer
-
-Unwrapping at any time returns the underlying ERC1155, which retains its full burn rights.
-
----
-
-## 5. Portfolio Investment
-
-### 5.1 Concept
+### 4.1 Concept
 
 The Portfolio NFT is the protocol's primary instrument. Its reserve is not held as idle ETH — it is deployed into a configurable basket of on-chain strategies, with SMF as the mandatory base layer.
 
@@ -237,7 +172,7 @@ Each asset slice specifies an `AssetType`:
 | `AAVE` | Aave V3 collateral deposit | aWETH held by Aave (shared proxy account) |
 | `STAKING` | (reserved — not yet supported, reverts) | — |
 
-### 5.2 SMF Tier Gates
+### 4.2 SMF Tier Gates
 
 Every portfolio must carry a minimum SMF allocation. Higher SMF weight unlocks additional strategy types:
 
@@ -250,7 +185,7 @@ Every portfolio must carry a minimum SMF allocation. Higher SMF weight unlocks a
 
 This gate structure ensures SMF always has structural demand from every portfolio deploy — the more diversified a portfolio, the more SMF it must hold as its foundation.
 
-### 5.3 Configuration
+### 4.3 Configuration
 
 The owner defines a basket with per-asset weights (in basis points, summing to 10,000) and type-specific parameters:
 
@@ -270,7 +205,7 @@ setPortfolioConfig(id, [
 
 Weights across all slice types must sum to exactly 10,000 bps.
 
-### 5.4 Lifecycle
+### 4.4 Lifecycle
 
 ```
 0. User:   buySMF()                                          — ETH → SMF (bonding curve)
@@ -285,7 +220,7 @@ Weights across all slice types must sum to exactly 10,000 bps.
 
 After `deploy()`, `portfolioActive[id]` is set to `true` and `reserve[id]` is zeroed. The six-parameter signature separates slippage guards by slice type: `erc20MinAmounts` is an array covering ERC20 slices in order; `smfMinAmount` is the minimum SMF expected from the bonding curve buy; the three LP parameters guard the V3 position mint.
 
-### 5.5 Deploying
+### 4.5 Deploying
 
 The keeper calls `deploy(id, erc20MinAmounts, smfMinAmount, lpSwapAmountOutMin, lpAmount0Min, lpAmount1Min)`:
 
@@ -298,7 +233,7 @@ The keeper calls `deploy(id, erc20MinAmounts, smfMinAmount, lpSwapAmountOutMin, 
    - **LP**: swaps half the allocated WETH to `token` via the swap router (`lpSwapAmountOutMin`), then mints a Uniswap V3 position (`lpAmount0Min`, `lpAmount1Min`). The position NFT is held by the proxy. Any token amounts unused by the position manager (current price ratio mismatch) are unwrapped back to ETH and added to `reserve[id]` as leftover.
 4. `portfolioActive[id]` is set to `true`.
 
-### 5.6 LP Slice Operations
+### 4.6 LP Slice Operations
 
 When a portfolio has an LP slice, two additional keeper operations are available:
 
@@ -314,7 +249,7 @@ When a portfolio has an LP slice, two additional keeper operations are available
 2. Any `tokenB` fees are swapped to WETH via the swap router.
 3. Total WETH is unwrapped to ETH and added to `reserve[id]`, increasing the backing per token for all holders.
 
-### 5.7 AAVE Slice — Collateral and Future Leverage
+### 4.7 AAVE Slice — Collateral and Future Leverage
 
 The AAVE slice is the protocol's collateral layer, designed in two phases:
 
@@ -328,7 +263,7 @@ On divest, `portfolioAaveWeth[id] × amount / supply` WETH is withdrawn from Aav
 
 A future upgrade will allow the keeper to borrow stablecoins against the AAVE collateral and deploy that capital further — effectively running a leveraged position as one slice of the portfolio. The borrow/repay loop, LTV caps, and emergency deleverage will be implemented at the slice level, keeping the portfolio as the single instrument type.
 
-### 5.8 Shared Aave Account
+### 4.8 Shared Aave Account
 
 All AAVE slices across all portfolio IDs share a single Aave account at the proxy address. This means:
 
@@ -337,7 +272,7 @@ All AAVE slices across all portfolio IDs share a single Aave account at the prox
 - In a portfolio with collateral-only AAVE slices (Phase 1) and no borrowed debt, the health factor is effectively infinite — these positions cannot be liquidated.
 - Once Phase 2 borrowing is introduced, debt from one portfolio's AAVE slice will affect the aggregate health factor seen by all other portfolios on the same proxy. This must be managed carefully.
 
-### 5.9 Divest
+### 4.9 Divest
 
 A holder calls `divest(id, amount, minEthOut)`. The contract dispatches per slice type using a pre-computed `supply` snapshot (before the burn reduces it):
 
@@ -350,15 +285,15 @@ All WETH is unwrapped and combined with the proportional share of `reserve[id]` 
 
 No burn fee applies. When all tokens have been divested, `portfolioActive[id]` resets and the owner may reconfigure the basket.
 
-### 5.10 Rebalancing
+### 4.10 Rebalancing
 
 The keeper submits `RebalanceInstruction[]` — a set of sell/buy pairs computed off-chain against the ERC20 slice holdings. The contract executes each swap against Uniswap V3. Slippage tolerance is enforced globally via `slippageToleranceBps`. AAVE and LP slices are not rebalanced — their positions change only via `deploy` and `divest`.
 
 ---
 
-## 6. SMF — Global ERC20 Token
+## 5. SMF — Global ERC20 Token
 
-### 6.1 Concept
+### 5.1 Concept
 
 SMF (`SmartfolioERC20`) is a standalone ERC20 contract that acts as the primary liquidity layer for the protocol. Rather than paying ETH directly to mint ERC1155 NFTs, users first buy SMF with ETH via its own bonding curve. SMF can then be burned to:
 
@@ -374,7 +309,7 @@ User ──SMF──▶ addToNFT()    ──ETH──▶ Smartfolio.addReserve()
 User ──ERC1155──▶ burn()     ──ETH──▶ User
 ```
 
-### 6.2 SMF Bonding Curve
+### 5.2 SMF Bonding Curve
 
 SMF has its own independent step-tier bonding curve, configured separately from the ERC1155 curve via `setTiers()`. The curve is driven by `smfTotalSupply` — the current SMF in circulation — and is structurally identical to the ERC1155 curve:
 
@@ -386,7 +321,7 @@ Tier 1:  smfTotalSupply  100 –   999   →  price₁ per SMF
 
 When SMF is burned the inverse curve is traversed: starting from the highest occupied tier, tokens are redeemed at their original tier price until the required ETH is covered. This ensures the ETH released by a burn exactly equals the ETH that was paid in for those tokens.
 
-### 6.3 Minting NFTs with SMF
+### 5.3 Minting NFTs with SMF
 
 A user calls `mintNFT(maxSmfBurn)`:
 
@@ -399,7 +334,7 @@ A user calls `mintNFT(maxSmfBurn)`:
 
 The NFT token ID is auto-assigned by the Smartfolio contract (`mintFundedNew`). There is no conversion fee — the entire ETH released by the burn flows into the NFT's reserve.
 
-### 6.4 Topping Up a Reserve
+### 5.4 Topping Up a Reserve
 
 A user calls `addToNFT(id, ethAmount, maxSmfBurn)`:
 
@@ -410,7 +345,7 @@ A user calls `addToNFT(id, ethAmount, maxSmfBurn)`:
 
 No conversion fee applies to reserve top-ups.
 
-### 6.5 Restricted Smartfolio Entry Points
+### 5.5 Restricted Smartfolio Entry Points
 
 Two entry points on the Smartfolio proxy are callable only by the registered SMF contract (`smfContract`):
 
@@ -419,7 +354,7 @@ Two entry points on the Smartfolio proxy are callable only by the registered SMF
 
 Both revert with `CallerNotSMFContract` if called by any other address. The SMF contract is registered via `setSMFContract(address)` (owner-only).
 
-### 6.6 Simulation Views
+### 5.6 Simulation Views
 
 | Function | Returns |
 |---|---|
@@ -431,7 +366,7 @@ Both revert with `CallerNotSMFContract` if called by any other address. The SMF 
 
 ---
 
-## 7. Security Properties
+## 6. Security Properties
 
 | Property | Mechanism |
 |---|---|
@@ -441,14 +376,13 @@ Both revert with `CallerNotSMFContract` if called by any other address. The SMF 
 | Upgrade safety | UUPS — only `_authorizeUpgrade` (owner) can approve implementation upgrades |
 | Storage safety | All state in `SmartfolioBase`; OpenZeppelin state uses EIP-7201 namespaced slots, no collision possible |
 | Slippage | `minEthOut` / `amountsOutMinimum` on all Uniswap interactions; `smfMinAmount` on bonding curve buys |
-| Wrap safety | ERC20 wrapper rejects portfolio-active tokens at deposit — only Standard tokens are wrappable |
 | Instrument exclusion | Once `setPortfolioConfig` is called for a token ID, the token is a Portfolio instrument. `portfolioActive[id]` is set on deploy and cleared only when all holders have exited. A token cannot transition between Standard and Portfolio |
 | Shared Aave account | All AAVE slices across all portfolio IDs share one proxy-level Aave account. Phase 1 (collateral-only) positions hold no debt and cannot be liquidated. Phase 2 borrowing (planned) will require careful aggregate health factor management across all portfolios on the proxy |
 | SMF entry point | `mintFundedNew` and `addReserve` on Smartfolio are restricted to the registered SMF contract via `CallerNotSMFContract`. No external party can inject ETH into a reserve or mint tokens at arbitrary prices |
 
 ---
 
-## 8. Instrument Types
+## 7. Instrument Types
 
 Smartfolio issues two instrument types. Each token ID is bound to exactly one type, determined by whether `setPortfolioConfig` has been called. Once a portfolio is configured and deployed, `portfolioActive[id]` is set and the token cannot be reconfigured until all holders have divested.
 
