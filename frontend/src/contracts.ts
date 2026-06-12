@@ -432,6 +432,26 @@ export const SMARTFOLIO_ABI = [
     outputs: [],
   },
   {
+    name: 'deployLP',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'id', type: 'uint256' },
+      { name: 'wethForSwap', type: 'uint256' },
+      { name: 'swapAmountOutMin', type: 'uint256' },
+      { name: 'amount0Min', type: 'uint256' },
+      { name: 'amount1Min', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'collectFees',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'id', type: 'uint256' }],
+    outputs: [],
+  },
+  {
     name: 'deploy',
     type: 'function',
     stateMutability: 'nonpayable',

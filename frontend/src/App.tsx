@@ -10,6 +10,7 @@ import DivestLeverageForm from './components/DivestLeverageForm'
 import KeeperPanel from './components/KeeperPanel'
 import LPInfoCard from './components/LPInfoCard'
 import DivestLPForm from './components/DivestLPForm'
+import LPKeeperPanel from './components/LPKeeperPanel'
 import SMFPanel from './components/SMFPanel'
 import NFTList from './components/NFTList'
 import MintNewForm from './components/MintNewForm'
@@ -174,6 +175,7 @@ export default function App() {
               <TokenIdInput tokenId={tokenId} setTokenId={setTokenId} />
               <LPInfoCard tokenId={tokenId} />
               <DivestLPForm tokenId={tokenId} />
+              <LPKeeperPanel tokenId={tokenId} />
             </div>
           )}
         </div>
