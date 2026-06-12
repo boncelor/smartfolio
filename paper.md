@@ -4,9 +4,17 @@
 
 ## Abstract
 
-Smartfolio is an on-chain portfolio protocol built on Ethereum. It issues ERC1155 tokens where each token ID represents a distinct financial instrument. Four instrument types are supported: Standard bonding-curve tokens, Portfolio tokens whose reserves are deployed into a mixed basket of ERC20 assets (Uniswap V3 swaps), Aave V3 collateral deposits, and/or Uniswap V3 LP positions in any combination, LP tokens whose reserves are provided as concentrated liquidity into a single Uniswap V3 pool, and Leverage tokens whose reserves are held as WETH collateral on Aave V3. All instruments are optionally wrappable into standard ERC20 tokens to unlock DeFi composability.
+Smartfolio is an on-chain portfolio protocol built on Ethereum. Its primary instrument is the **Portfolio NFT** — an ERC1155 token whose reserve is deployed into a configurable basket of on-chain strategies. The fundamental user flow is:
 
-The protocol's primary entry point is **SMF** (`SmartfolioERC20`) — a global ERC20 token with its own bonding curve. Users buy SMF with ETH, then burn SMF to mint ERC1155 NFTs or to top up existing NFT reserves. The ETH backing of burned SMF flows directly into the NFT's reserve.
+```
+ETH → buySMF() → SMF → mintNFT() → Portfolio NFT
+                                          ↓ deploy()
+                              SMF slice + optional ERC20 / LP / AAVE slices
+```
+
+Users buy **SMF** (`SmartfolioERC20`) with ETH via a step-tier bonding curve. Burning SMF mints a Portfolio NFT — the ETH backing of the burned SMF becomes the NFT's reserve. The keeper then deploys that reserve into a basket: every portfolio must allocate at least 20% to SMF (buying it back via the bonding curve), ensuring SMF always has structural demand. Additional weight can be distributed across ERC20 token swaps (Uniswap V3), Aave V3 collateral deposits, and Uniswap V3 LP positions — each unlocked by carrying a higher SMF allocation.
+
+Beyond Portfolio NFTs the protocol also supports two specialised instruments: **LP tokens** (reserve deployed as a single concentrated Uniswap V3 position) and **Leverage tokens** (reserve held as WETH collateral on Aave V3). All instruments are optionally wrappable into standard ERC20 tokens via a factory, unlocking DeFi composability.
 
 The protocol is deployed as a single UUPS upgradeable proxy backed by a delegatecall facet architecture, keeping each contract under the EVM's 24 KB bytecode limit while sharing a single storage and ETH context.
 
@@ -198,43 +206,71 @@ Unwrapping at any time returns the underlying ERC1155, which retains its full bu
 
 ### 5.1 Concept
 
-A Portfolio token is a Standard token whose ETH reserve is deployed into a mixed basket of sub-strategies. Each asset slice specifies an `AssetType` that determines how its ETH allocation is deployed:
+The Portfolio NFT is the protocol's primary instrument. Its reserve is not held as idle ETH — it is deployed into a configurable basket of on-chain strategies, with SMF as the mandatory base layer.
+
+**Funding flow:**
+
+```
+ETH → buySMF() → SMF → mintNFT() → reserve[id] (ETH)
+                                         ↓ deploy()
+                              SMF slice (mandatory, min 20%)
+                            + ERC20 slices  (Uniswap V3 swaps)
+                            + LP slices     (Uniswap V3 positions)
+                            + AAVE slices   (Aave V3 collateral)
+```
+
+When the keeper deploys, the reserve ETH is allocated across the configured slices. The simplest valid portfolio is **100% SMF** — the entire reserve is used to buy SMF via the bonding curve. Adding other asset types distributes weight away from SMF while keeping the protocol's minimum SMF floor intact.
+
+Each asset slice specifies an `AssetType`:
 
 | `AssetType` | Strategy | Underlying |
 |---|---|---|
-| `ERC20` | Uniswap V3 token swap | ERC20 held by proxy |
-| `AAVE` | Aave V3 collateral deposit | aWETH held by Aave (shared proxy account) |
-| `LP` | Uniswap V3 LP position | Position NFT held by proxy |
 | `SMF` | Buy SMF via bonding curve | SMF ERC20 held by proxy |
+| `ERC20` | Uniswap V3 token swap | ERC20 held by proxy |
+| `LP` | Uniswap V3 LP position | Position NFT held by proxy |
+| `AAVE` | Aave V3 collateral deposit | aWETH held by Aave (shared proxy account) |
 | `STAKING` | (reserved — not yet supported, reverts) | — |
 
-A single portfolio can combine ERC20, AAVE, LP, and SMF types in one basket. At least one SMF slice is required; the minimum SMF weight determines which other asset types are unlocked (see §5.2 tier gates).
+### 5.2 SMF Tier Gates
 
-### 5.2 Configuration
+Every portfolio must carry a minimum SMF allocation. Higher SMF weight unlocks additional strategy types:
+
+| SMF weight in basket | Tier | Strategies unlocked |
+|---|---|---|
+| < 20% | — | Reverts — config rejected |
+| ≥ 20% | 1 (Base) | SMF + ERC20 swaps |
+| ≥ 40% | 2 (LP) | + Uniswap V3 LP positions |
+| ≥ 60% | 3 (Leverage) | + Aave V3 collateral deposits |
+
+This gate structure ensures SMF always has structural demand from every portfolio deploy — the more diversified a portfolio, the more SMF it must hold as its foundation.
+
+### 5.3 Configuration
 
 The owner defines a basket with per-asset weights (in basis points, summing to 10,000) and type-specific parameters:
 
 ```
 setPortfolioConfig(id, [
-  { assetType: ERC20, token: WBTC,  weightBps: 5000, poolFee: 3000, ... },
-  { assetType: AAVE,  token: 0,     weightBps: 2000, ... },
-  { assetType: LP,    token: USDC,  weightBps: 3000, poolFee: 500,
+  { assetType: SMF,  token: smfAddress, weightBps: 2000, ... },
+  { assetType: ERC20, token: WBTC,     weightBps: 5000, poolFee: 3000, ... },
+  { assetType: LP,    token: USDC,     weightBps: 3000, poolFee: 500,
     swapFee: 500, tickLower: -887220, tickUpper: 887220, ... },
 ])
 ```
 
+- **SMF slices** require `token` set to the SMF contract address. Only one SMF slice is allowed per portfolio.
 - **ERC20 slices** require `token` (target ERC20) and `poolFee` (Uniswap pool fee tier). Optional `swapPath`/`sellSwapPath` override single-hop with multi-hop routes.
 - **AAVE slices** carry no additional parameters — WETH is deposited directly into Aave.
 - **LP slices** require `token` (paired token), `poolFee` (LP pool fee tier), `swapFee` (router fee for the WETH→token swap), and `tickLower`/`tickUpper` (price range).
 
 Weights across all slice types must sum to exactly 10,000 bps.
 
-### 5.3 Lifecycle
+### 5.4 Lifecycle
 
 ```
+0. User:   buySMF()                                          — ETH → SMF (bonding curve)
 1. Owner:  setPortfolioConfig(id, assets)                    — define basket
 2. Owner:  setDefaultAavePool(pool)                          — required if any AAVE slice
-3. User:   mint(alice, id, amount)                           — ETH → reserve[id]
+3. User:   mintNFT(maxSmfBurn)                               — burn SMF → ETH → reserve[id]
 4. Keeper: deploy(id, erc20MinAmounts, smfMinAmount, lpSwapMin, lp0Min, lp1Min)
                                                              — reserve ETH → basket
 5. Keeper: rebalance(id, instructions)                       — ERC20 slices only
@@ -243,7 +279,7 @@ Weights across all slice types must sum to exactly 10,000 bps.
 
 After `deploy()`, `portfolioActive[id]` is set to `true` and `reserve[id]` is zeroed. The six-parameter signature separates slippage guards by slice type: `erc20MinAmounts` is an array covering ERC20 slices in order; `smfMinAmount` is the minimum SMF expected from the bonding curve buy; the three LP parameters guard the V3 position mint.
 
-### 5.4 Deploying
+### 5.5 Deploying
 
 The keeper calls `deploy(id, erc20MinAmounts, smfMinAmount, lpSwapAmountOutMin, lpAmount0Min, lpAmount1Min)`:
 
@@ -256,7 +292,7 @@ The keeper calls `deploy(id, erc20MinAmounts, smfMinAmount, lpSwapAmountOutMin, 
    - **LP**: swaps half the allocated WETH to `token` via the swap router (`lpSwapAmountOutMin`), then mints a Uniswap V3 position (`lpAmount0Min`, `lpAmount1Min`). The position NFT is held by the proxy. Any token amounts unused by the position manager (current price ratio mismatch) are unwrapped back to ETH and added to `reserve[id]` as leftover.
 4. `portfolioActive[id]` is set to `true`.
 
-### 5.5 Shared Aave Account (B2 Model)
+### 5.6 Shared Aave Account (B2 Model)
 
 All AAVE slices across all portfolio IDs, plus all standalone Leverage tokens, share a single Aave account at the proxy address. This means:
 
@@ -265,12 +301,13 @@ All AAVE slices across all portfolio IDs, plus all standalone Leverage tokens, s
 - A sufficiently large borrow on one leverage token will affect the health factor seen by all other IDs.
 - In a portfolio with no leverage tokens and no borrowed debt, the health factor is effectively infinite — AAVE slices in portfolios are collateral-only positions (no borrowing), so they cannot be liquidated in isolation.
 
-See Section 8 for the associated security note.
+See Section 9 for the associated security note.
 
-### 5.6 Divest
+### 5.7 Divest
 
 A holder calls `divest(id, amount, minEthOut)`. The contract dispatches per slice type using a pre-computed `supply` snapshot (before the burn reduces it):
 
+- **SMF**: sells `portfolioSMFHoldings[id] × amount / supply` SMF back to ETH via `sellSMF()` on the bonding curve.
 - **ERC20**: sells `holdings × amount / supply` of each token back to WETH via Uniswap.
 - **AAVE**: withdraws `portfolioAaveWeth[id] × amount / supply` WETH from Aave.
 - **LP**: removes `lpLiquidity × amount / supply` liquidity from the V3 position. The last holder receives all remaining liquidity to avoid dust. Collected tokenB is swapped to WETH.
@@ -279,7 +316,7 @@ All WETH is unwrapped and combined with the proportional share of `reserve[id]` 
 
 No burn fee applies. When all tokens have been divested, `portfolioActive[id]` resets and the owner may reconfigure the basket.
 
-### 5.7 Rebalancing
+### 5.8 Rebalancing
 
 The keeper submits `RebalanceInstruction[]` — a set of sell/buy pairs computed off-chain against the ERC20 slice holdings. The contract executes each swap against Uniswap V3. Slippage tolerance is enforced globally via `slippageToleranceBps`. AAVE and LP slices are not rebalanced — their positions change only via `deploy` and `divest`.
 
