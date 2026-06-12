@@ -68,7 +68,6 @@ contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
 
     function burn(uint256 id, uint256 amount) external {
         if (portfolioActive[id]) revert UseDivest();
-        if (lpActive[id])        revert UseDivest();
         if (amount == 0) revert AmountZero();
         if (balanceOf(msg.sender, id) < amount) revert InsufficientBalance();
 

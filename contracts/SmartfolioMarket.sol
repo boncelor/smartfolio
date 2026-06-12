@@ -80,7 +80,6 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
         PortfolioAsset[] storage assets = _getPortfolioConfig(id);
         if (assets.length == 0) revert NoPortfolioConfig();
         if (portfolioActive[id]) revert AlreadyDeployed();
-        if (lpActive[id]) revert LiquidityAlreadyActive();
         if (reserve[id] == 0) revert NoReserveToDeploy();
 
         // Count ERC20 assets for minAmounts array length check

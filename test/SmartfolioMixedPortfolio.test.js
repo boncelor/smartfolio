@@ -15,8 +15,6 @@ const { deployProxy } = require("@openzeppelin/truffle-upgrades");
 const Smartfolio                  = artifacts.require("Smartfolio");
 const SmartfolioTreasury          = artifacts.require("SmartfolioTreasury");
 const SmartfolioMarket            = artifacts.require("SmartfolioMarket");
-const SmartfolioCreditMarket      = artifacts.require("SmartfolioCreditMarket");
-const SmartfolioLiquidityMarket   = artifacts.require("SmartfolioLiquidityMarket");
 const MockERC20                   = artifacts.require("MockERC20");
 const MockWETH                    = artifacts.require("MockWETH");
 const MockSwapRouter              = artifacts.require("MockSwapRouter");
@@ -64,19 +62,14 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
   let sf, weth, tokenA, tokenB, router, aave, npm, mockSMF;
 
   beforeEach(async () => {
-    const treasury        = await SmartfolioTreasury.new();
-    const market          = await SmartfolioMarket.new();
-    const creditMarket    = await SmartfolioCreditMarket.new();
-    const liquidityMarket = await SmartfolioLiquidityMarket.new();
+    const treasury = await SmartfolioTreasury.new();
+    const market   = await SmartfolioMarket.new();
 
     sf = await deployProxy(
       Smartfolio,
-      [owner, treasury.address, market.address, creditMarket.address],
+      [owner, treasury.address, market.address],
       { kind: "uups" }
     );
-    await sf.pause({ from: owner });
-    await sf.setLiquidityMarketFacet(liquidityMarket.address, { from: owner });
-    await sf.unpause({ from: owner });
     await sf.setTiers(TIERS, { from: owner });
     await sf.setKeeper(keeper, { from: owner });
 

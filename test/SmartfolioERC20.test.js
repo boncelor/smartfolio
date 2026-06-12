@@ -2,8 +2,6 @@ const { deployProxy } = require("@openzeppelin/truffle-upgrades");
 const Smartfolio             = artifacts.require("Smartfolio");
 const SmartfolioTreasury     = artifacts.require("SmartfolioTreasury");
 const SmartfolioMarket       = artifacts.require("SmartfolioMarket");
-const SmartfolioCreditMarket = artifacts.require("SmartfolioCreditMarket");
-const SmartfolioLiquidityMarket = artifacts.require("SmartfolioLiquidityMarket");
 const SmartfolioERC20        = artifacts.require("SmartfolioERC20");
 const MockV3Aggregator       = artifacts.require("MockV3Aggregator");
 
@@ -46,19 +44,14 @@ contract("SmartfolioERC20", (accounts) => {
   let sf, smf, feed;
 
   beforeEach(async () => {
-    const treasury     = await SmartfolioTreasury.new();
-    const market       = await SmartfolioMarket.new();
-    const creditMarket = await SmartfolioCreditMarket.new();
-    const liqMarket    = await SmartfolioLiquidityMarket.new();
+    const treasury = await SmartfolioTreasury.new();
+    const market   = await SmartfolioMarket.new();
 
     sf = await deployProxy(
       Smartfolio,
-      [owner, treasury.address, market.address, creditMarket.address],
+      [owner, treasury.address, market.address],
       { kind: "uups" }
     );
-    await sf.pause({ from: owner });
-    await sf.setLiquidityMarketFacet(liqMarket.address, { from: owner });
-    await sf.unpause({ from: owner });
     await sf.setTiers(NFT_TIERS, { from: owner });
 
     // Mock Chainlink feed: ETH = $3 000
