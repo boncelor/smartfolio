@@ -35,10 +35,8 @@ module.exports = async function (callback) {
     console.log("\n✓ setNftCostParams tx:", tx.tx);
 
     // Verify
-    const { smfRequired, ethNeeded } = await smf.smfForNFT();
-    console.log("\nsmfForNFT() →");
-    console.log("  smfRequired:", smfRequired.toString(), "SMF units");
-    console.log("  ethNeeded:  ", ethNeeded.toString(), "wei");
+    const smfRequired = await smf.smfForNFT();
+    console.log("\nsmfForNFT() →", smfRequired.toString(), "SMF units");
 
     callback();
   } catch (err) {
