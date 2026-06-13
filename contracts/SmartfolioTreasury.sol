@@ -65,6 +65,7 @@ contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
         globalTotalMinted += 1;
         globalTotalSupply += 1;
         portfolioSMFHoldings[id] += smfAmount;
+        smfContractForNFT[id] = smfContract;
         IERC20(smfContract).transferFrom(msg.sender, address(this), smfAmount);
         _mint(to, id, 1, "");
 
@@ -120,6 +121,7 @@ contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
 
         uint256 smfAmt = portfolioSMFHoldings[id];
         uint256 ethAmt = reserve[id];
+        address smfAddr = smfContractForNFT[id] != address(0) ? smfContractForNFT[id] : smfContract;
 
         totalSupply[id] -= 1;
         globalTotalSupply -= 1;
@@ -129,7 +131,7 @@ contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
         _burn(msg.sender, id, 1);
 
         if (smfAmt > 0) {
-            IERC20(smfContract).transfer(msg.sender, smfAmt);
+            IERC20(smfAddr).transfer(msg.sender, smfAmt);
         }
         if (ethAmt > 0) {
             (bool ok, ) = msg.sender.call{value: ethAmt}("");

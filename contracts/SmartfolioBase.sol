@@ -270,6 +270,10 @@ abstract contract SmartfolioBase {
     ///      via the bonding curve, not Uniswap.
     mapping(uint256 => uint256) public portfolioSMFHoldings;
 
+    /// @dev The SMF contract address that minted each NFT's SMF holdings.
+    ///      Used to return the correct SMF tokens on withdrawSMF.
+    mapping(uint256 => address) public smfContractForNFT;
+
     // -------------------------------------------------------------------------
     // Modifiers
     // -------------------------------------------------------------------------
