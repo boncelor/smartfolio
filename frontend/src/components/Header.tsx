@@ -1,27 +1,26 @@
 import { ConnectButton } from '@rainbow-me/rainbowkit'
-import { useReadContract, useAccount, useBalance } from 'wagmi'
+import { useReadContracts, useAccount } from 'wagmi'
 import { formatEther } from 'viem'
-import { SMF_ADDRESS, SMF_ABI, CONTRACT_ADDRESS } from '../contracts'
+import { SMF_ADDRESS, SMF_ABI } from '../contracts'
 
 export default function Header() {
   const { address } = useAccount()
 
-  const { data: contractEth } = useBalance({
-    address: CONTRACT_ADDRESS,
+  const { data } = useReadContracts({
+    contracts: [
+      { address: SMF_ADDRESS, abi: SMF_ABI, functionName: 'smfTotalSupply' },
+      { address: SMF_ADDRESS, abi: SMF_ABI, functionName: 'balanceOf', args: [address ?? '0x0000000000000000000000000000000000000000'] },
+    ],
   })
 
-  const { data: smfSupply } = useReadContract({
-    address: SMF_ADDRESS,
-    abi: SMF_ABI,
-    functionName: 'smfTotalSupply',
-  })
+  const smfSupply  = data?.[0]?.status === 'success' ? (data[0].result as bigint) : undefined
+  const smfBalance = data?.[1]?.status === 'success' ? (data[1].result as bigint) : undefined
 
-  const { data: smfBalance } = useReadContract({
-    address: SMF_ADDRESS,
-    abi: SMF_ABI,
-    functionName: 'balanceOf',
-    args: [address ?? '0x0000000000000000000000000000000000000000'],
-    query: { enabled: !!address },
+  const { data: smfBacking } = useReadContracts({
+    contracts: smfSupply !== undefined && smfSupply > 0n ? [
+      { address: SMF_ADDRESS, abi: SMF_ABI, functionName: 'smfBurnValue', args: [smfSupply] },
+    ] : [],
+    query: { enabled: smfSupply !== undefined && smfSupply > 0n },
   })
 
   return (
@@ -40,7 +39,7 @@ export default function Header() {
 
           {/* Contract stats */}
           <div className="hidden md:flex items-center gap-4 ml-2" style={{ borderLeft: '1px solid rgba(212,175,55,0.2)', paddingLeft: '1rem' }}>
-            <Stat label="ETH" value={contractEth ? parseFloat(formatEther(contractEth.value)).toFixed(4) : '—'} />
+            <Stat label="SMF Backing" value={smfBacking?.[0]?.status === 'success' ? `${parseFloat(formatEther(smfBacking[0].result as bigint)).toFixed(4)} ETH` : '—'} />
             <Stat label="SMF" value={smfSupply !== undefined ? smfSupply.toString() : '—'} />
             {address && smfBalance !== undefined && (
               <Stat label="Your SMF" value={smfBalance.toString()} highlight />
