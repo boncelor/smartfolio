@@ -56,6 +56,7 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     error InvalidFeedDecimals();
     error StalePrice();
     error InvalidPrice();
+    error InvalidFeeRate();
 
     // -------------------------------------------------------------------------
     // Events
@@ -91,6 +92,8 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     address public treasury;         // future use
     AggregatorV3Interface public ethUsdFeed;   // Chainlink ETH/USD feed (kept for future use)
     uint256 public priceMaxAge = 30 minutes;   // staleness threshold
+
+    uint256 public maxSmfSellFeeRate = 0.8e18; // WAD-scaled; 0.8e18 = 80% max fee
 
     // NFT minting cost parameters
     uint256 public nftCount;                  // total NFTs ever minted
@@ -133,6 +136,11 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     function setTreasury(address _treasury) external onlyOwner {
         treasury = _treasury;
         emit TreasurySet(_treasury);
+    }
+
+    function setMaxSmfSellFeeRate(uint256 rate) external onlyOwner {
+        if (rate > 1e18) revert InvalidFeeRate();
+        maxSmfSellFeeRate = rate;
     }
 
     function setSmartfolio(address _smartfolio) external onlyOwner {
@@ -203,17 +211,24 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
         if (amount == 0) revert AmountZero();
         if (balanceOf(msg.sender) < amount) revert InsufficientSMFBalance();
 
-        uint256 ethOut = _ethForSmfAmount(amount);
-        if (ethOut < minEthOut) revert SlippageExceeded();
-        if (address(this).balance < ethOut) revert InsufficientETH();
+        uint256 gross = _ethForSmfAmount(amount);
+        (uint256 fee, uint256 net) = _smfSellFee(amount, gross);
+        if (net < minEthOut) revert SlippageExceeded();
+        if (address(this).balance < gross) revert InsufficientETH();
 
         smfTotalSupply -= amount;
         _burn(msg.sender, amount);
 
-        emit SMFBurned(msg.sender, amount, ethOut);
+        emit SMFBurned(msg.sender, amount, net);
 
-        (bool ok, ) = msg.sender.call{value: ethOut}("");
+        (bool ok, ) = msg.sender.call{value: net}("");
         if (!ok) revert ETHTransferFailed();
+
+        if (fee > 0 && treasury != address(0)) {
+            (bool feeOk, ) = treasury.call{value: fee}("");
+            if (!feeOk) revert ETHTransferFailed();
+        }
+        // If no treasury, fee stays in the pool (benefits remaining holders)
     }
 
     // -------------------------------------------------------------------------
@@ -303,7 +318,22 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
      * @notice Simulate the ETH received from selling `amount` SMF tokens.
      */
     function smfBurnValue(uint256 amount) public view returns (uint256 ethOut) {
-        return _ethForSmfAmount(amount);
+        uint256 gross = _ethForSmfAmount(amount);
+        (, ethOut) = _smfSellFee(amount, gross);
+    }
+
+    function smfSellFee(uint256 amount) external view returns (uint256 fee, uint256 net) {
+        uint256 gross = _ethForSmfAmount(amount);
+        (fee, net) = _smfSellFee(amount, gross);
+    }
+
+    function _smfSellFee(uint256 amount, uint256 gross) internal view returns (uint256 fee, uint256 net) {
+        uint256 supply = smfTotalSupply;
+        if (supply == 0 || maxSmfSellFeeRate == 0) return (0, gross);
+        uint256 proportion = (amount * 1e18) / supply;
+        uint256 feeRate = (proportion * proportion / 1e18) * maxSmfSellFeeRate / 1e18;
+        fee = gross * feeRate / 1e18;
+        net = gross - fee;
     }
 
     /**

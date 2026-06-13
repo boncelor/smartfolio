@@ -37,6 +37,14 @@ export default function SMFPanel() {
     query: { enabled: action === 'burn' && isValid },
   })
 
+  const { data: sellFeeData } = useReadContract({
+    address: SMF_ADDRESS,
+    abi: SMF_ABI,
+    functionName: 'smfSellFee',
+    args: [BigInt(parsedAmount)],
+    query: { enabled: action === 'burn' && isValid },
+  })
+
   const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract()
   const { isLoading: isConfirming, isSuccess: isConfirmed } =
     useWaitForTransactionReceipt({ hash: txHash })
@@ -55,11 +63,13 @@ export default function SMFPanel() {
     }
 
     if (action === 'burn' && burnValue !== undefined && isValid) {
+      // minEthOut = 95% of net (5% slippage tolerance)
+      const minEthOut = burnValue * 95n / 100n
       writeContract({
         address: SMF_ADDRESS,
         abi: SMF_ABI,
         functionName: 'sellSMF',
-        args: [BigInt(parsedAmount), 0n],
+        args: [BigInt(parsedAmount), minEthOut],
       })
     }
   }
@@ -147,10 +157,20 @@ export default function SMFPanel() {
             <span className="font-semibold text-gold">{formatEther(buyCost)} ETH</span>
           </div>
         )}
-        {action === 'burn' && burnValue !== undefined && isValid && (
-          <div className="flex items-center justify-between box-info">
-            <span className="stat-label" style={{ marginBottom: 0 }}>You receive</span>
-            <span className="font-semibold text-gold">{formatEther(burnValue)} ETH</span>
+        {action === 'burn' && sellFeeData !== undefined && isValid && (
+          <div className="box-info space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="stat-label" style={{ marginBottom: 0 }}>Gross</span>
+              <span className="text-white font-medium">{formatEther((sellFeeData as [bigint, bigint])[0] + (sellFeeData as [bigint, bigint])[1])} ETH</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="stat-label" style={{ marginBottom: 0 }}>Fee</span>
+              <span style={{ color: '#fb923c' }} className="font-medium">{formatEther((sellFeeData as [bigint, bigint])[0])} ETH</span>
+            </div>
+            <div className="flex justify-between pt-2 border-t" style={{ borderColor: 'rgba(212,175,55,0.12)' }}>
+              <span className="stat-label" style={{ marginBottom: 0 }}>You receive</span>
+              <span className="font-bold text-gold">{formatEther((sellFeeData as [bigint, bigint])[1])} ETH</span>
+            </div>
           </div>
         )}
       </div>

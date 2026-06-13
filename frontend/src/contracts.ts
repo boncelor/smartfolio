@@ -132,6 +132,16 @@ export const SMF_ABI = [
     outputs: [],
   },
   {
+    name: 'smfSellFee',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: [
+      { name: 'fee', type: 'uint256' },
+      { name: 'net', type: 'uint256' },
+    ],
+  },
+  {
     name: 'NFTMinted',
     type: 'event',
     inputs: [

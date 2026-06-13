@@ -417,10 +417,23 @@ All three revert with `CallerNotSMFContract` if called by any other address. The
 | Function | Returns |
 |---|---|
 | `smfMintCost(amount)` | ETH cost to buy `amount` SMF |
-| `smfBurnValue(amount)` | ETH received from selling `amount` SMF |
+| `smfBurnValue(amount)` | Net ETH received from selling `amount` SMF (after quadratic fee) |
 | `smfForNFT()` | `smfRequired` — simulate `mintNFT` cost from current on-chain state |
 | `smfForReserve(ethAmount)` | `smfRequired` — simulate `addETHToNFT` cost |
 | `getTiers()` | Current SMF tier configuration |
+
+### 5.7 SMF Sell Fee
+
+`sellSMF` applies a quadratic fee based on the seller's share of `smfTotalSupply`:
+
+```
+proportion = amount / smfTotalSupply
+feeRate    = proportion² × maxSmfSellFeeRate
+fee        = gross × feeRate
+net        = gross − fee
+```
+
+`maxSmfSellFeeRate` is an admin-configurable parameter (WAD-scaled). At the default of 0.8e18 (80%), a seller redeeming 100% of supply pays 80% fee; one redeeming 10% pays 0.8%; one redeeming 1% pays 0.008%. The fee stays in the bonding curve pool (benefiting remaining holders) unless a treasury is configured, in which case it is forwarded there. `smfBurnValue(amount)` returns the net amount after fee.
 
 ---
 
@@ -448,4 +461,4 @@ Smartfolio issues two instrument types. Each token ID is bound to exactly one ty
 |---|---|---|---|---|
 | **Standard** | ETH in `reserve[id]` | `mint()` with ETH | `burn()` | Quadratic exit fee (0–80%) |
 | **Portfolio** | SMF + ERC20 (Uniswap V3) + LP (Uniswap V3) + AAVE (Aave V3) | `mintNFT()` via SMF | `divest()` | None |
-| **SMF** | ETH pool (independent bonding curve) | `buySMF()` with ETH | `sellSMF()` for ETH; or `mintNFT()` to convert into a Portfolio NFT | None |
+| **SMF** | ETH pool (independent bonding curve) | `buySMF()` with ETH | `sellSMF()` for ETH; or `mintNFT()` to convert into a Portfolio NFT | Quadratic sell fee (0–`maxSmfSellFeeRate`) |
