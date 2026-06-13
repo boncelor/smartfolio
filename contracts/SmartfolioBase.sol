@@ -212,7 +212,7 @@ abstract contract SmartfolioBase {
     // State — portfolio
     // -------------------------------------------------------------------------
 
-    mapping(uint256 => PortfolioAsset[]) private _portfolioConfig;
+    mapping(uint256 => PortfolioAsset[]) internal _portfolioConfig;
     mapping(uint256 => bool) public portfolioActive;
     mapping(uint256 => mapping(address => uint256)) public portfolioHoldings;
     mapping(uint256 => uint256) public deployedEth;

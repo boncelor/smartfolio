@@ -330,7 +330,7 @@ A user calls `mintNFT()`:
 
 1. `smfCost = _nftMintCost()` — dynamic cost, fully deterministic from on-chain state (no oracle).
 2. Transfers `smfCost` SMF from the caller to `SmartfolioERC20` via `transferFrom` (caller must have pre-approved `smfContract`).
-3. `SmartfolioERC20` forwards the SMF to the Smartfolio proxy via `Smartfolio.mintWithSMF(caller, smfCost)`, which auto-assigns a new token ID, mints 1 ERC1155 to the caller, and credits `portfolioSMFHoldings[id] += smfCost`. **No ETH moves at mint time.**
+3. `SmartfolioERC20` forwards the SMF to the Smartfolio proxy via `Smartfolio.mintWithSMF(caller, smfCost)`, which auto-assigns a new token ID, mints 1 ERC1155 to the caller, credits `portfolioSMFHoldings[id] += smfCost`, and writes a default portfolio config of **100% SMF** (single asset, `weightBps = 10000`). **No ETH moves at mint time.**
 4. Increments `nftCount` and `totalSmfLockedInNFTs`.
 5. Returns the newly assigned `id`.
 

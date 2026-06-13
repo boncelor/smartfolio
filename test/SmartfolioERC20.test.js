@@ -464,6 +464,12 @@ contract("SmartfolioERC20", (accounts) => {
       assert.equal((await sf.reserve(TOKEN_ID)).toString(), "0");
       assert.equal((await sf.portfolioSMFHoldings(TOKEN_ID)).toString(), mintCost.toString());
 
+      // Default config: 100% SMF
+      const config = await sf.getPortfolioConfig(TOKEN_ID);
+      assert.equal(config.length, 1);
+      assert.equal(config[0].assetType.toString(), "3"); // AssetType.SMF
+      assert.equal(config[0].weightBps.toString(), "10000");
+
       // addSMFToNFT — grows SMF holdings, no ETH
       await smf.approve(smf.address, 10, { from: alice });
       await smf.addSMFToNFT(TOKEN_ID, 10, { from: alice });

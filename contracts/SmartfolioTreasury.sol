@@ -67,6 +67,20 @@ contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
         portfolioSMFHoldings[id] += smfAmount;
         IERC20(smfContract).transferFrom(msg.sender, address(this), smfAmount);
         _mint(to, id, 1, "");
+
+        // Default portfolio config: 100% SMF
+        _portfolioConfig[id].push(PortfolioAsset({
+            assetType: AssetType.SMF,
+            token: smfContract,
+            weightBps: 10000,
+            poolFee: 0,
+            swapFee: 0,
+            tickLower: 0,
+            tickUpper: 0,
+            swapPath: "",
+            sellSwapPath: ""
+        }));
+
         emit MintFunded(to, id, 1, 0);
     }
 
