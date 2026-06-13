@@ -98,29 +98,34 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
         </div>
       )}
 
-      {/* Active holdings */}
-      {active && (smfHoldings !== undefined || aaveWeth !== undefined) && (
+      {/* SMF holdings — shown pre- and post-deployment */}
+      {smfHoldings !== undefined && smfHoldings > 0n && (
+        <div className="space-y-1.5">
+          <p className="stat-label">SMF in Portfolio</p>
+          <div
+            className="rounded px-2.5 py-1.5 flex items-center justify-between text-sm"
+            style={{ background: 'rgba(5,25,14,0.7)', border: '1px solid rgba(212,175,55,0.12)' }}
+          >
+            <span style={{ color: 'rgba(212,175,55,0.6)', fontSize: '0.75rem' }}>
+              {active ? 'Deployed' : 'Pending deployment'}
+            </span>
+            <span className="font-semibold text-white">{smfHoldings.toString()} SMF</span>
+          </div>
+        </div>
+      )}
+
+      {/* Active holdings (AAVE etc.) */}
+      {active && aaveWeth !== undefined && aaveWeth > 0n && (
         <div className="space-y-1.5">
           <p className="stat-label">Holdings</p>
           <div className="grid grid-cols-2 gap-2 text-sm">
-            {smfHoldings !== undefined && smfHoldings > 0n && (
-              <div
-                className="rounded px-2.5 py-1.5"
-                style={{ background: 'rgba(5,25,14,0.7)', border: '1px solid rgba(212,175,55,0.12)' }}
-              >
-                <p className="stat-label" style={{ fontSize: '0.65rem' }}>SMF tokens</p>
-                <p className="font-semibold text-white">{formatEther(smfHoldings)}</p>
-              </div>
-            )}
-            {aaveWeth !== undefined && aaveWeth > 0n && (
-              <div
-                className="rounded px-2.5 py-1.5"
-                style={{ background: 'rgba(5,25,14,0.7)', border: '1px solid rgba(212,175,55,0.12)' }}
-              >
-                <p className="stat-label" style={{ fontSize: '0.65rem' }}>AAVE WETH</p>
-                <p className="font-semibold text-white">{formatEther(aaveWeth)} ETH</p>
-              </div>
-            )}
+            <div
+              className="rounded px-2.5 py-1.5"
+              style={{ background: 'rgba(5,25,14,0.7)', border: '1px solid rgba(212,175,55,0.12)' }}
+            >
+              <p className="stat-label" style={{ fontSize: '0.65rem' }}>AAVE WETH</p>
+              <p className="font-semibold text-white">{formatEther(aaveWeth)} ETH</p>
+            </div>
           </div>
         </div>
       )}
