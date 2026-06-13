@@ -104,6 +104,22 @@ contract Smartfolio is
         _delegateTo(treasuryFacet);
     }
 
+    /// @notice Mint 1 ERC1155 to `to` and credit SMF holdings. SMF pulled from caller.
+    function mintWithSMF(address to, uint256 smfAmount)
+        external nonReentrant whenNotPaused returns (uint256)
+    {
+        if (msg.sender != smfContract) revert CallerNotSMFContract();
+        _delegateTo(treasuryFacet);
+    }
+
+    /// @notice Add SMF to an existing NFT's portfolio holdings. SMF pulled from caller.
+    function receiveSMF(uint256 id, uint256 smfAmount)
+        external nonReentrant whenNotPaused
+    {
+        if (msg.sender != smfContract) revert CallerNotSMFContract();
+        _delegateTo(treasuryFacet);
+    }
+
     function mintFunded(address to, uint256 id, uint256 amount)
         external payable nonReentrant whenNotPaused
     {

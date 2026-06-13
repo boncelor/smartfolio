@@ -295,18 +295,21 @@ The keeper submits `RebalanceInstruction[]` — a set of sell/buy pairs computed
 
 ### 5.1 Concept
 
-SMF (`SmartfolioERC20`) is a standalone ERC20 contract that acts as the primary liquidity layer for the protocol. Rather than paying ETH directly to mint ERC1155 NFTs, users first buy SMF with ETH via its own bonding curve. SMF can then be burned to:
+SMF (`SmartfolioERC20`) is a standalone ERC20 contract that acts as the primary liquidity layer for the protocol. Users buy SMF with ETH via its own bonding curve, then use SMF to mint NFTs and grow portfolio holdings.
 
-1. **Mint a new ERC1155 NFT** — the ETH backing of burned SMF flows into `reserve[id]`, funding the NFT.
-2. **Top up an existing NFT's reserve** — burn SMF to increase the backing per token for all holders of an ID without minting new tokens.
+SMF is **never burned into ETH when entering an NFT**. It is transferred as SMF directly into the Smartfolio proxy and held as `portfolioSMFHoldings[id]` until the keeper deploys or rebalances the portfolio. This preserves SMF's supply and keeps the bonding curve intact.
 
-The NFT itself is redeemed as usual via `burn()`, returning ETH to the holder.
+Two separate paths exist for growing an NFT after mint:
+
+1. **`addSMFToNFT(id, smfAmount)`** — transfers SMF from the caller directly to the Smartfolio proxy (no ETH conversion). Increases `portfolioSMFHoldings[id]`. Requires prior `approve(smfContract, smfAmount)`.
+2. **`addETHToNFT(id, ethAmount, maxSmfBurn)`** — burns SMF → releases ETH from the bonding curve → adds ETH to `reserve[id]`. Increases the undeployed ETH backing immediately.
 
 ```
-User ──ETH──▶ buySMF()      ──SMF──▶ User
-User ──SMF──▶ mintNFT()     ──ETH──▶ Smartfolio.mintFundedNew()  ──ERC1155 (auto-ID)──▶ User
-User ──SMF──▶ addToNFT()    ──ETH──▶ Smartfolio.addReserve()     (no ERC1155 minted)
-User ──ERC1155──▶ burn()     ──ETH──▶ User
+User ──ETH──▶ buySMF()           ──SMF──▶ User
+User ──SMF──▶ mintNFT()          ──SMF──▶ Smartfolio.receiveSMF()   ──ERC1155 (auto-ID)──▶ User
+User ──SMF──▶ addSMFToNFT()      ──SMF──▶ Smartfolio.receiveSMF()   (portfolioSMFHoldings[id] ++)
+User ──SMF──▶ addETHToNFT()      ──ETH──▶ Smartfolio.addReserve()   (reserve[id] ++)
+User ──ERC1155──▶ burn()          ──ETH──▶ User
 ```
 
 ### 5.2 SMF Bonding Curve
@@ -325,13 +328,13 @@ When SMF is burned the inverse curve is traversed: starting from the highest occ
 
 A user calls `mintNFT()`:
 
-1. `smfToBurn = _nftMintCost()` — dynamic cost, fully deterministic from on-chain state (no oracle).
-2. Burns `smfToBurn` SMF from the caller; decrements `smfTotalSupply`; increments `nftCount` and `totalSmfLockedInNFTs`.
-3. `ethNeeded = _ethForSmfAmount(smfToBurn)` — ETH equivalent of the burned SMF on the bonding curve.
-4. Calls `Smartfolio.mintFundedNew{value: ethNeeded}(caller)` — auto-assigns a new token ID, mints 1 ERC1155, and adds `ethNeeded` to `reserve[id]`.
+1. `smfCost = _nftMintCost()` — dynamic cost, fully deterministic from on-chain state (no oracle).
+2. Transfers `smfCost` SMF from the caller to `SmartfolioERC20` via `transferFrom` (caller must have pre-approved `smfContract`).
+3. `SmartfolioERC20` forwards the SMF to the Smartfolio proxy via `Smartfolio.mintWithSMF(caller, smfCost)`, which auto-assigns a new token ID, mints 1 ERC1155 to the caller, and credits `portfolioSMFHoldings[id] += smfCost`. **No ETH moves at mint time.**
+4. Increments `nftCount` and `totalSmfLockedInNFTs`.
 5. Returns the newly assigned `id`.
 
-No slippage param is needed — the cost is a pure function of on-chain state and only changes discretely when a new NFT is minted, not continuously.
+The SMF cost is a portfolio entry fee that stays as SMF inside the NFT until the keeper deploys or rebalances. No slippage param is needed — the cost is a pure function of on-chain state.
 
 #### Dynamic Cost Formula
 
@@ -374,25 +377,34 @@ Two accumulators are maintained on `SmartfolioERC20`:
 - `nftCount` — total NFTs ever minted via `mintNFT()`. Drives the logarithmic component.
 - `totalSmfLockedInNFTs` — cumulative SMF burned specifically for NFT minting. Drives the lock-ratio component.
 
-### 5.4 Topping Up a Reserve
+### 5.4 Topping Up an NFT
 
-A user calls `addToNFT(id, ethAmount, maxSmfBurn)`:
+Two separate functions grow an existing NFT's holdings:
+
+**`addSMFToNFT(id, smfAmount)`** — transfers SMF as-is into the portfolio:
+
+1. Transfers `smfAmount` SMF from the caller to `SmartfolioERC20` via `transferFrom` (caller must have pre-approved `smfContract`).
+2. Calls `Smartfolio.receiveSMF(id, smfAmount)` — credits `portfolioSMFHoldings[id] += smfAmount`. No ETH moves.
+3. The SMF sits in the portfolio until the keeper deploys or rebalances.
+
+**`addETHToNFT(id, ethAmount, maxSmfBurn)`** — converts SMF to ETH and adds it to the undeployed reserve:
 
 1. `smfToBurn = _smfAmountForEth(ethAmount)` — inverse curve traversal.
-2. Reverts if `smfToBurn > maxSmfBurn`.
-3. Burns SMF, calls `Smartfolio.addReserve{value: ethAmount}(id)`.
-4. `reserve[id]` increases by `ethAmount`; existing holders' backing per token increases immediately.
+2. Reverts if `smfToBurn > maxSmfBurn` (slippage guard).
+3. Burns `smfToBurn` SMF, releases `ethAmount` ETH from the bonding curve pool.
+4. Calls `Smartfolio.addReserve{value: ethAmount}(id)` — `reserve[id]` increases immediately.
 
-No conversion fee applies to reserve top-ups.
+No conversion fee applies to either path.
 
 ### 5.5 Restricted Smartfolio Entry Points
 
-Two entry points on the Smartfolio proxy are callable only by the registered SMF contract (`smfContract`):
+Three entry points on the Smartfolio proxy are callable only by the registered SMF contract (`smfContract`):
 
-- `mintFundedNew(address to) payable returns (uint256 id)` — auto-assigns the next token ID, mints 1 ERC1155 to `to`, and adds `msg.value` to `reserve[id]`. No bonding curve price check.
+- `mintWithSMF(address to, uint256 smfAmount) returns (uint256 id)` — auto-assigns the next token ID, mints 1 ERC1155 to `to`, and credits `portfolioSMFHoldings[id] += smfAmount`. Pulls `smfAmount` SMF from the caller (`smfContract`). No ETH.
+- `receiveSMF(uint256 id, uint256 smfAmount)` — credits `portfolioSMFHoldings[id] += smfAmount`. Pulls `smfAmount` SMF from the caller. No ETH.
 - `addReserve(uint256 id) payable` — adds `msg.value` to `reserve[id]` without minting tokens.
 
-Both revert with `CallerNotSMFContract` if called by any other address. The SMF contract is registered via `setSMFContract(address)` (owner-only).
+All three revert with `CallerNotSMFContract` if called by any other address. The SMF contract is registered via `setSMFContract(address)` (owner-only).
 
 ### 5.6 Simulation Views
 
@@ -400,8 +412,8 @@ Both revert with `CallerNotSMFContract` if called by any other address. The SMF 
 |---|---|
 | `smfMintCost(amount)` | ETH cost to buy `amount` SMF |
 | `smfBurnValue(amount)` | ETH received from selling `amount` SMF |
-| `smfForNFT()` | `(smfRequired, ethNeeded)` — simulate `mintNFT` cost from current on-chain state |
-| `smfForReserve(ethAmount)` | `smfRequired` — simulate `addToNFT` cost |
+| `smfForNFT()` | `smfRequired` — simulate `mintNFT` cost from current on-chain state |
+| `smfForReserve(ethAmount)` | `smfRequired` — simulate `addETHToNFT` cost |
 | `getTiers()` | Current SMF tier configuration |
 
 ---

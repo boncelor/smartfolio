@@ -18,6 +18,8 @@ interface AggregatorV3Interface {
 
 interface ISmartfolio {
     function mintFundedNew(address to) external payable returns (uint256 id);
+    function mintWithSMF(address to, uint256 smfAmount) external returns (uint256 id);
+    function receiveSMF(uint256 id, uint256 smfAmount) external;
     function addReserve(uint256 id) external payable;
 }
 
@@ -219,26 +221,27 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     // -------------------------------------------------------------------------
 
     /**
-     * @notice Burn SMF to mint 1 new ERC1155 NFT. Cost is determined dynamically by
-     *         `_nftMintCost()` — no oracle, no slippage param needed.
+     * @notice Transfer SMF to mint 1 new ERC1155 NFT. The SMF stays as SMF inside
+     *         the NFT's portfolio holdings — no ETH conversion at mint time.
+     *         Caller must have pre-approved this contract for at least `_nftMintCost()` SMF.
      * @return id  The newly assigned Smartfolio token ID.
      */
     function mintNFT() external nonReentrant returns (uint256 id) {
         if (smartfolio == address(0)) revert SmartfolioNotSet();
 
-        uint256 smfToBurn = _nftMintCost();
-        if (balanceOf(msg.sender) < smfToBurn) revert InsufficientSMFBalance();
+        uint256 smfCost = _nftMintCost();
+        if (balanceOf(msg.sender) < smfCost) revert InsufficientSMFBalance();
 
-        smfTotalSupply -= smfToBurn;
-        _burn(msg.sender, smfToBurn);
+        // Pull SMF from caller into this contract, then forward to Smartfolio
+        _transfer(msg.sender, address(this), smfCost);
+        _approve(address(this), smartfolio, smfCost);
 
         nftCount += 1;
-        totalSmfLockedInNFTs += smfToBurn;
+        totalSmfLockedInNFTs += smfCost;
 
-        uint256 ethNeeded = _ethForSmfAmount(smfToBurn);
-        id = ISmartfolio(smartfolio).mintFundedNew{value: ethNeeded}(msg.sender);
+        id = ISmartfolio(smartfolio).mintWithSMF(msg.sender, smfCost);
 
-        emit NFTMinted(msg.sender, id, smfToBurn, ethNeeded);
+        emit NFTMinted(msg.sender, id, smfCost, 0);
     }
 
     // -------------------------------------------------------------------------
@@ -246,13 +249,33 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     // -------------------------------------------------------------------------
 
     /**
-     * @notice Burn SMF to increase the ETH reserve backing of an existing NFT (no fee).
-     *         Increases the backing-per-token for all holders of `id` without minting new NFTs.
+     * @notice Transfer SMF directly into an existing NFT's portfolio holdings.
+     *         No ETH conversion — SMF stays as SMF until the keeper deploys/rebalances.
+     *         Caller must have pre-approved this contract for at least `smfAmount` SMF.
+     * @param id         Smartfolio ERC1155 token ID to top up.
+     * @param smfAmount  SMF to transfer into the NFT's portfolio holdings.
+     */
+    function addSMFToNFT(uint256 id, uint256 smfAmount) external nonReentrant {
+        if (smartfolio == address(0)) revert SmartfolioNotSet();
+        if (smfAmount == 0) revert AmountZero();
+        if (balanceOf(msg.sender) < smfAmount) revert InsufficientSMFBalance();
+
+        _transfer(msg.sender, address(this), smfAmount);
+        _approve(address(this), smartfolio, smfAmount);
+
+        ISmartfolio(smartfolio).receiveSMF(id, smfAmount);
+
+        emit ReserveAdded(msg.sender, id, 0, smfAmount);
+    }
+
+    /**
+     * @notice Burn SMF → release ETH from the bonding curve → add ETH to reserve[id].
+     *         Increases the undeployed ETH backing immediately (no keeper required).
      * @param id          Smartfolio ERC1155 token ID to top up.
      * @param ethAmount   ETH value to add to reserve[id].
      * @param maxSmfBurn  Slippage guard — reverts if SMF to burn exceeds this.
      */
-    function addToNFT(uint256 id, uint256 ethAmount, uint256 maxSmfBurn) external nonReentrant {
+    function addETHToNFT(uint256 id, uint256 ethAmount, uint256 maxSmfBurn) external nonReentrant {
         if (smartfolio == address(0)) revert SmartfolioNotSet();
         if (ethAmount == 0) revert AmountZero();
 
@@ -284,19 +307,12 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice Simulate the SMF cost to mint 1 new NFT and the ETH that will flow
-     *         into the NFT's reserve. Fully deterministic — no oracle required.
-     * @return smfRequired  SMF to burn.
-     * @return ethNeeded    ETH value locked into the NFT reserve.
+     * @notice Simulate the SMF cost to mint 1 new NFT.
+     *         No ETH moves at mint — SMF is transferred directly into the NFT's portfolio holdings.
+     * @return smfRequired  SMF to transfer (caller must approve this amount).
      */
-    function smfForNFT()
-        external view
-        returns (uint256 smfRequired, uint256 ethNeeded)
-    {
+    function smfForNFT() external view returns (uint256 smfRequired) {
         smfRequired = _nftMintCost();
-        if (smfRequired > 0) {
-            ethNeeded = _ethForSmfAmount(smfRequired);
-        }
     }
 
     /**

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./SmartfolioBase.sol";
 
 /**
@@ -50,6 +51,34 @@ contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
         if (msg.value == 0) revert InsufficientETH();
         reserve[id] += msg.value;
         emit ReserveAdded(id, msg.value);
+    }
+
+    /**
+     * @dev Mint 1 ERC1155 to `to` and credit SMF holdings. SMF is pulled from
+     *      the caller (smfContract) which has already received it from the user.
+     */
+    function mintWithSMF(address to, uint256 smfAmount) external returns (uint256 id) {
+        if (smfAmount == 0) revert AmountZero();
+        id = ++nextTokenId;
+        totalMinted[id] += 1;
+        totalSupply[id] += 1;
+        globalTotalMinted += 1;
+        globalTotalSupply += 1;
+        portfolioSMFHoldings[id] += smfAmount;
+        IERC20(smfContract).transferFrom(msg.sender, address(this), smfAmount);
+        _mint(to, id, 1, "");
+        emit MintFunded(to, id, 1, 0);
+    }
+
+    /**
+     * @dev Credit SMF to an existing NFT's portfolio holdings.
+     *      SMF is pulled from the caller (smfContract).
+     */
+    function receiveSMF(uint256 id, uint256 smfAmount) external {
+        if (smfAmount == 0) revert AmountZero();
+        portfolioSMFHoldings[id] += smfAmount;
+        IERC20(smfContract).transferFrom(msg.sender, address(this), smfAmount);
+        emit ReserveAdded(id, 0);
     }
 
     /// @notice Sweep sub-wei rounding dust left in reserve[id] after all tokens have

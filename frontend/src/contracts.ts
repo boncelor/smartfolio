@@ -46,10 +46,7 @@ export const SMF_ABI = [
     type: 'function',
     stateMutability: 'view',
     inputs: [],
-    outputs: [
-      { name: 'smfRequired', type: 'uint256' },
-      { name: 'ethNeeded', type: 'uint256' },
-    ],
+    outputs: [{ name: 'smfRequired', type: 'uint256' }],
   },
   {
     name: 'smfForReserve',
@@ -87,7 +84,17 @@ export const SMF_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
   {
-    name: 'addToNFT',
+    name: 'addSMFToNFT',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'id', type: 'uint256' },
+      { name: 'smfAmount', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'addETHToNFT',
     type: 'function',
     stateMutability: 'nonpayable',
     inputs: [
@@ -96,6 +103,16 @@ export const SMF_ABI = [
       { name: 'maxSmfBurn', type: 'uint256' },
     ],
     outputs: [],
+  },
+  {
+    name: 'approve',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
   },
   {
     name: 'smfBurnValue',
