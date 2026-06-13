@@ -141,6 +141,12 @@ In practice, accumulated dust across thousands of burns on a single token ID is 
 
 Leverage tokens are not explicitly blocked by `burn()`. However, leverage tokens hold no ETH in `reserve[id]` — their backing is in Aave — so burning a leverage token returns 0 ETH. Holders must use `divestLeverage()` to recover their Aave collateral.
 
+### 3.6 Pre-Deployment Exit — `withdrawSMF(id)`
+
+Before the keeper deploys a Portfolio NFT (i.e. `portfolioActive[id] == false`), the holder may exit via `withdrawSMF(id)`. This burns the ERC1155 token (exactly 1) and transfers the full `portfolioSMFHoldings[id]` balance directly back to the caller as SMF tokens — no ETH conversion, no bonding curve interaction, no fee. Any ETH in `reserve[id]` is also returned.
+
+This is the clean exit for a freshly minted NFT that has not yet been deployed.
+
 ---
 
 ## 4. Portfolio Investment
@@ -330,7 +336,7 @@ A user calls `mintNFT()`:
 
 1. `smfCost = _nftMintCost()` — dynamic cost, fully deterministic from on-chain state (no oracle).
 2. Transfers `smfCost` SMF from the caller to `SmartfolioERC20` via `transferFrom` (caller must have pre-approved `smfContract`).
-3. `SmartfolioERC20` forwards the SMF to the Smartfolio proxy via `Smartfolio.mintWithSMF(caller, smfCost)`, which auto-assigns a new token ID, mints 1 ERC1155 to the caller, and credits `portfolioSMFHoldings[id] += smfCost`. **No ETH moves at mint time.**
+3. `SmartfolioERC20` forwards the SMF to the Smartfolio proxy via `Smartfolio.mintWithSMF(caller, smfCost)`, which auto-assigns a new token ID, mints 1 ERC1155 to the caller, credits `portfolioSMFHoldings[id] += smfCost`, and writes a default portfolio config of **100% SMF** (single asset, `weightBps = 10000`). **No ETH moves at mint time.**
 4. Increments `nftCount` and `totalSmfLockedInNFTs`.
 5. Returns the newly assigned `id`.
 
@@ -411,10 +417,23 @@ All three revert with `CallerNotSMFContract` if called by any other address. The
 | Function | Returns |
 |---|---|
 | `smfMintCost(amount)` | ETH cost to buy `amount` SMF |
-| `smfBurnValue(amount)` | ETH received from selling `amount` SMF |
+| `smfBurnValue(amount)` | Net ETH received from selling `amount` SMF (after quadratic fee) |
 | `smfForNFT()` | `smfRequired` — simulate `mintNFT` cost from current on-chain state |
 | `smfForReserve(ethAmount)` | `smfRequired` — simulate `addETHToNFT` cost |
 | `getTiers()` | Current SMF tier configuration |
+
+### 5.7 SMF Sell Fee
+
+`sellSMF` applies a quadratic fee based on the seller's share of `smfTotalSupply`:
+
+```
+proportion = amount / smfTotalSupply
+feeRate    = proportion² × maxSmfSellFeeRate
+fee        = gross × feeRate
+net        = gross − fee
+```
+
+`maxSmfSellFeeRate` is an admin-configurable parameter (WAD-scaled). At the default of 0.8e18 (80%), a seller redeeming 100% of supply pays 80% fee; one redeeming 10% pays 0.8%; one redeeming 1% pays 0.008%. The fee stays in the bonding curve pool (benefiting remaining holders) unless a treasury is configured, in which case it is forwarded there. `smfBurnValue(amount)` returns the net amount after fee.
 
 ---
 
@@ -442,4 +461,4 @@ Smartfolio issues two instrument types. Each token ID is bound to exactly one ty
 |---|---|---|---|---|
 | **Standard** | ETH in `reserve[id]` | `mint()` with ETH | `burn()` | Quadratic exit fee (0–80%) |
 | **Portfolio** | SMF + ERC20 (Uniswap V3) + LP (Uniswap V3) + AAVE (Aave V3) | `mintNFT()` via SMF | `divest()` | None |
-| **SMF** | ETH pool (independent bonding curve) | `buySMF()` with ETH | `sellSMF()` for ETH; or `mintNFT()` to convert into a Portfolio NFT | None |
+| **SMF** | ETH pool (independent bonding curve) | `buySMF()` with ETH | `sellSMF()` for ETH; or `mintNFT()` to convert into a Portfolio NFT | Quadratic sell fee (0–`maxSmfSellFeeRate`) |
