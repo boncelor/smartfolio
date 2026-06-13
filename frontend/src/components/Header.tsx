@@ -39,11 +39,11 @@ export default function Header() {
 
           {/* Contract stats */}
           <div className="hidden md:flex items-center gap-4 ml-2" style={{ borderLeft: '1px solid rgba(212,175,55,0.2)', paddingLeft: '1rem' }}>
-            <Stat label="SMF Backing" value={smfBacking?.[0]?.status === 'success' ? `${parseFloat(formatEther(smfBacking[0].result as bigint)).toFixed(4)} ETH` : '—'} />
-            <Stat label="SMF" value={smfSupply !== undefined ? smfSupply.toString() : '—'} />
+            <Stat label="Total SMF" value={smfSupply !== undefined ? smfSupply.toString() : '—'} />
             {address && smfBalance !== undefined && (
               <Stat label="Your SMF" value={smfBalance.toString()} highlight />
             )}
+            <Stat label="Backing ETH" value={smfBacking?.[0]?.status === 'success' ? `${parseFloat(formatEther(smfBacking[0].result as bigint)).toFixed(4)} ETH` : '—'} />
           </div>
         </div>
         <ConnectButton />
