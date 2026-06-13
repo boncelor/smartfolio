@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useReadContracts, useReadContract, useAccount } from 'wagmi'
+import { useReadContracts } from 'wagmi'
 import { formatEther } from 'viem'
 import { CONTRACT_ADDRESS, SMARTFOLIO_ABI } from '../contracts'
 
@@ -10,7 +10,6 @@ interface Props {
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 export default function InfoCard({ tokenId }: Props) {
-  const { address, isConnected } = useAccount()
   const isZeroAddress = CONTRACT_ADDRESS === ZERO_ADDRESS
 
   const [imageUri, setImageUri] = useState<string | null>(null)
@@ -26,19 +25,11 @@ export default function InfoCard({ tokenId }: Props) {
       {
         address: CONTRACT_ADDRESS,
         abi: SMARTFOLIO_ABI,
-        functionName: 'portfolioActive',
+        functionName: 'portfolioSMFHoldings',
         args: [BigInt(tokenId)],
       },
     ],
     query: { enabled: !isZeroAddress },
-  })
-
-  const { data: balance } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: SMARTFOLIO_ABI,
-    functionName: 'balanceOf',
-    args: [address!, BigInt(tokenId)],
-    query: { enabled: isConnected && !!address && !isZeroAddress },
   })
 
   // Fetch metadata image from API
@@ -69,12 +60,8 @@ export default function InfoCard({ tokenId }: Props) {
     )
   }
 
-  const tokenInfoResult = data?.[0]
-  const portfolioActiveResult = data?.[1]
-
-  const info = tokenInfoResult?.status === 'success' ? tokenInfoResult.result : null
-  const portfolioActive =
-    portfolioActiveResult?.status === 'success' ? portfolioActiveResult.result : null
+  const info = data?.[0]?.status === 'success' ? data[0].result : null
+  const smfHoldings = data?.[1]?.status === 'success' ? (data[1].result as bigint) : undefined
 
   if (!info) {
     return (
@@ -96,51 +83,20 @@ export default function InfoCard({ tokenId }: Props) {
         />
       )}
 
-      {/* Row 1 */}
       <div className="grid grid-cols-3 gap-4">
         <div>
-          <p className="stat-label">Supply</p>
-          <p className="stat-value">{info.circulatingSupply.toString()}</p>
+          <p className="stat-label">SMF Balance</p>
+          <p className="stat-value">{smfHoldings !== undefined ? smfHoldings.toString() : '—'} SMF</p>
         </div>
         <div>
-          <p className="stat-label">Reserve</p>
+          <p className="stat-label">ETH Balance</p>
           <p className="stat-value">{formatEther(info.reserve)} ETH</p>
         </div>
-        <div>
-          <p className="stat-label">Backing / Token</p>
-          <p className="stat-value">{formatEther(info.backingPerToken / 10n ** 18n)} ETH</p>
-        </div>
-      </div>
-
-      {/* Row 2 */}
-      <div className="grid grid-cols-3 gap-4 pt-3 border-t divider-money">
         <div>
           <p className="stat-label">Tier</p>
           <p className="stat-value">{info.currentTierIndex.toString()}</p>
         </div>
-        <div>
-          <p className="stat-label">Next Price</p>
-          <p className="stat-value">{formatEther(info.currentPrice)} ETH</p>
-        </div>
-        <div>
-          <p className="stat-label">Status</p>
-          {portfolioActive === null ? (
-            <span style={{ color: 'rgba(255,255,255,0.3)' }}>—</span>
-          ) : portfolioActive ? (
-            <span className="badge-green">Portfolio Active</span>
-          ) : (
-            <span className="badge-gold">Reserve Mode</span>
-          )}
-        </div>
       </div>
-
-      {/* User balance */}
-      {isConnected && balance !== undefined && (
-        <div className="pt-3 border-t divider-money flex items-center justify-between">
-          <span className="stat-label" style={{ marginBottom: 0 }}>Your Balance</span>
-          <span className="font-semibold text-white">{balance.toString()} tokens</span>
-        </div>
-      )}
     </div>
   )
 }
