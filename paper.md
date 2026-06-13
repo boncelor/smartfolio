@@ -141,6 +141,12 @@ In practice, accumulated dust across thousands of burns on a single token ID is 
 
 Leverage tokens are not explicitly blocked by `burn()`. However, leverage tokens hold no ETH in `reserve[id]` — their backing is in Aave — so burning a leverage token returns 0 ETH. Holders must use `divestLeverage()` to recover their Aave collateral.
 
+### 3.6 Pre-Deployment Exit — `withdrawSMF(id)`
+
+Before the keeper deploys a Portfolio NFT (i.e. `portfolioActive[id] == false`), the holder may exit via `withdrawSMF(id)`. This burns the ERC1155 token (exactly 1) and transfers the full `portfolioSMFHoldings[id]` balance directly back to the caller as SMF tokens — no ETH conversion, no bonding curve interaction, no fee. Any ETH in `reserve[id]` is also returned.
+
+This is the clean exit for a freshly minted NFT that has not yet been deployed.
+
 ---
 
 ## 4. Portfolio Investment

@@ -109,6 +109,36 @@ contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
         if (!ok) revert ETHTransferFailed();
     }
 
+    /**
+     * @notice Pre-deployment exit. Burns the caller's 1 ERC1155 token and returns
+     *         the full SMF holdings (and any ETH reserve) to the caller.
+     *         Only callable before the keeper deploys the portfolio.
+     */
+    function withdrawSMF(uint256 id) external {
+        if (portfolioActive[id]) revert UseDivest();
+        if (balanceOf(msg.sender, id) == 0) revert InsufficientBalance();
+
+        uint256 smfAmt = portfolioSMFHoldings[id];
+        uint256 ethAmt = reserve[id];
+
+        totalSupply[id] -= 1;
+        globalTotalSupply -= 1;
+        if (smfAmt > 0) portfolioSMFHoldings[id] = 0;
+        if (ethAmt > 0) reserve[id] = 0;
+
+        _burn(msg.sender, id, 1);
+
+        if (smfAmt > 0) {
+            IERC20(smfContract).transfer(msg.sender, smfAmt);
+        }
+        if (ethAmt > 0) {
+            (bool ok, ) = msg.sender.call{value: ethAmt}("");
+            if (!ok) revert ETHTransferFailed();
+        }
+
+        emit Burned(msg.sender, id, 1, ethAmt, 0);
+    }
+
     function burn(uint256 id, uint256 amount) external {
         if (portfolioActive[id]) revert UseDivest();
         if (amount == 0) revert AmountZero();

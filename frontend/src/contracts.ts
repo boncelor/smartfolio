@@ -287,6 +287,13 @@ export const SMARTFOLIO_ABI = [
   },
   // Write functions
   {
+    name: 'withdrawSMF',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'id', type: 'uint256' }],
+    outputs: [],
+  },
+  {
     name: 'burn',
     type: 'function',
     stateMutability: 'nonpayable',

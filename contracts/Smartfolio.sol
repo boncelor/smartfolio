@@ -91,6 +91,12 @@ contract Smartfolio is
     // Mutating entry points — guarded here, logic in facets
     // -------------------------------------------------------------------------
 
+    function withdrawSMF(uint256 id)
+        external nonReentrant whenNotPaused
+    {
+        _delegateTo(treasuryFacet);
+    }
+
     function burn(uint256 id, uint256 amount)
         external nonReentrant whenNotPaused
     {

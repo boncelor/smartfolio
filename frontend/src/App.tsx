@@ -5,9 +5,8 @@ import SMFPanel from './components/SMFPanel'
 import NFTList from './components/NFTList'
 import MintNewForm from './components/MintNewForm'
 import InfoCard from './components/InfoCard'
-import BurnForm from './components/BurnForm'
+import ExitForm from './components/ExitForm'
 import PortfolioInfoCard from './components/PortfolioInfoCard'
-import DivestForm from './components/DivestForm'
 import PortfolioKeeperPanel from './components/PortfolioKeeperPanel'
 import PortfolioConfigForm from './components/PortfolioConfigForm'
 import PaperView from './components/PaperView'
@@ -133,9 +132,8 @@ export default function App() {
                   </div>
 
                   <InfoCard tokenId={tokenId} />
-                  <BurnForm tokenId={tokenId} />
+                  <ExitForm tokenId={tokenId} />
                   <PortfolioInfoCard tokenId={tokenId} />
-                  <DivestForm tokenId={tokenId} />
                   <PortfolioKeeperPanel tokenId={tokenId} />
                   <PortfolioConfigForm tokenId={tokenId} />
                 </>
