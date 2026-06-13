@@ -10,14 +10,16 @@ import PortfolioInfoCard from './components/PortfolioInfoCard'
 import DivestForm from './components/DivestForm'
 import PortfolioKeeperPanel from './components/PortfolioKeeperPanel'
 import PortfolioConfigForm from './components/PortfolioConfigForm'
+import PaperView from './components/PaperView'
 
-type Tab = 'smf' | 'nft'
+type Tab = 'smf' | 'nft' | 'paper'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 const TAB_LABELS: Record<Tab, string> = {
   smf: 'SMF',
   nft: 'NFT',
+  paper: 'Paper',
 }
 
 const TABS = Object.keys(TAB_LABELS) as Tab[]
@@ -89,6 +91,9 @@ export default function App() {
 
           {/* SMF tab */}
           {activeTab === 'smf' && <SMFPanel />}
+
+          {/* Paper tab */}
+          {activeTab === 'paper' && <PaperView />}
 
           {/* NFT tab */}
           {activeTab === 'nft' && (
