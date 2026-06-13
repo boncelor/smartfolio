@@ -1,7 +1,7 @@
 import { ConnectButton } from '@rainbow-me/rainbowkit'
-import { useReadContracts, useAccount } from 'wagmi'
+import { useReadContracts, useBalance, useAccount } from 'wagmi'
 import { formatEther } from 'viem'
-import { SMF_ADDRESS, SMF_ABI } from '../contracts'
+import { SMF_ADDRESS, SMF_ABI, CONTRACT_ADDRESS } from '../contracts'
 
 export default function Header() {
   const { address } = useAccount()
@@ -15,6 +15,13 @@ export default function Header() {
 
   const smfSupply  = data?.[0]?.status === 'success' ? (data[0].result as bigint) : undefined
   const smfBalance = data?.[1]?.status === 'success' ? (data[1].result as bigint) : undefined
+
+  const { data: smfEth  } = useBalance({ address: SMF_ADDRESS })
+  const { data: proxyEth } = useBalance({ address: CONTRACT_ADDRESS })
+
+  const tvl = smfEth && proxyEth
+    ? smfEth.value + proxyEth.value
+    : undefined
 
   const { data: smfBacking } = useReadContracts({
     contracts: smfSupply !== undefined && smfSupply > 0n ? [
@@ -39,6 +46,7 @@ export default function Header() {
 
           {/* Contract stats */}
           <div className="hidden md:flex items-center gap-4 ml-2" style={{ borderLeft: '1px solid rgba(212,175,55,0.2)', paddingLeft: '1rem' }}>
+            <Stat label="TVL" value={tvl !== undefined ? `${parseFloat(formatEther(tvl)).toFixed(4)} ETH` : '—'} />
             <Stat label="Total SMF" value={smfSupply !== undefined ? smfSupply.toString() : '—'} />
             {address && smfBalance !== undefined && (
               <Stat label="Your SMF" value={smfBalance.toString()} highlight />
