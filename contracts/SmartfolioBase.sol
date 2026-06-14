@@ -64,6 +64,7 @@ abstract contract SmartfolioBase {
     error TierRequiresMoreSMF();
     error StakingNotSupported();
     error SMFContractNotSet();
+    error NotAuthorized();
 
     // -------------------------------------------------------------------------
     // Events

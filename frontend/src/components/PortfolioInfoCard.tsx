@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { useReadContracts } from 'wagmi'
+import { useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAccount, usePublicClient } from 'wagmi'
 import { formatEther } from 'viem'
 import { CONTRACT_ADDRESS, SMARTFOLIO_ABI } from '../contracts'
 import PortfolioConfigForm from './PortfolioConfigForm'
+import { buildRebalanceInstructions, type RebalancePreview } from '../utils/rebalanceInstructions'
 
 interface Props {
   tokenId: number
@@ -11,11 +12,21 @@ interface Props {
 const ASSET_TYPE_LABELS = ['ERC20', 'AAVE', 'LP', 'SMF', 'STAKING']
 const TIER_LABELS = ['Base (≥20% SMF)', 'LP (≥40% SMF)', 'Leverage (≥60% SMF)']
 
+// Sepolia WETH
+const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14'
+
+type Mode = 'view' | 'config' | 'rebalance'
+
 export default function PortfolioInfoCard({ tokenId }: Props) {
-  const [configuring, setConfiguring] = useState(false)
+  const [mode, setMode] = useState<Mode>('view')
+  const [preview, setPreview] = useState<RebalancePreview | null>(null)
+  const [quoting, setQuoting] = useState(false)
+
+  const { address, isConnected } = useAccount()
+  const publicClient = usePublicClient()
   const id = BigInt(tokenId)
 
-  const { data } = useReadContracts({
+  const { data, refetch } = useReadContracts({
     contracts: [
       { address: CONTRACT_ADDRESS, abi: SMARTFOLIO_ABI, functionName: 'reserve',              args: [id] },
       { address: CONTRACT_ADDRESS, abi: SMARTFOLIO_ABI, functionName: 'totalSupply',          args: [id] },
@@ -23,27 +34,41 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
       { address: CONTRACT_ADDRESS, abi: SMARTFOLIO_ABI, functionName: 'getPortfolioTierInfo', args: [id] },
       { address: CONTRACT_ADDRESS, abi: SMARTFOLIO_ABI, functionName: 'portfolioSMFHoldings', args: [id] },
       { address: CONTRACT_ADDRESS, abi: SMARTFOLIO_ABI, functionName: 'portfolioAaveWeth',    args: [id] },
+      { address: CONTRACT_ADDRESS, abi: SMARTFOLIO_ABI, functionName: 'balanceOf',            args: [address ?? '0x0000000000000000000000000000000000000000', id] },
     ],
     query: { enabled: tokenId > 0 },
   })
 
-  const reserve        = data?.[0]?.status === 'success' ? (data[0].result as bigint) : undefined
-  const totalSupply    = data?.[1]?.status === 'success' ? (data[1].result as bigint) : undefined
-  const config         = data?.[2]?.status === 'success' ? (data[2].result as readonly { assetType: number; token: string; weightBps: number }[]) : undefined
-  const tierInfo       = data?.[3]?.status === 'success' ? (data[3].result as readonly [bigint, number]) : undefined
-  const smfHoldings    = data?.[4]?.status === 'success' ? (data[4].result as bigint) : undefined
-  const aaveWeth       = data?.[5]?.status === 'success' ? (data[5].result as bigint) : undefined
+  const reserve      = data?.[0]?.status === 'success' ? (data[0].result as bigint) : undefined
+  const totalSupply  = data?.[1]?.status === 'success' ? (data[1].result as bigint) : undefined
+  const config       = data?.[2]?.status === 'success' ? (data[2].result as readonly { assetType: number; token: string; weightBps: number; poolFee: number; sellSwapPath: string }[]) : undefined
+  const tierInfo     = data?.[3]?.status === 'success' ? (data[3].result as readonly [bigint, number]) : undefined
+  const smfHoldings  = data?.[4]?.status === 'success' ? (data[4].result as bigint) : undefined
+  const aaveWeth     = data?.[5]?.status === 'success' ? (data[5].result as bigint) : undefined
+  const holderBalance = data?.[6]?.status === 'success' ? (data[6].result as bigint) : undefined
 
   const smfWeightBps = tierInfo?.[0]
   const tier         = tierInfo?.[1]
+  const isHolder     = isConnected && holderBalance !== undefined && holderBalance > 0n
+  const hasReserve   = reserve !== undefined && reserve > 0n
+  const hasErc20     = config !== undefined && config.some(a => a.assetType === 0)
+
+  // Rebalance write
+  const { writeContract: writeRebalance, data: rebalanceHash, isPending: rebalancePending, error: rebalanceError, reset: resetRebalance } = useWriteContract()
+  const { isLoading: rebalanceConfirming, isSuccess: rebalanceConfirmed } = useWaitForTransactionReceipt({ hash: rebalanceHash })
+
+  // Deploy reserve write
+  const { writeContract: writeDeploy, data: deployHash, isPending: deployPending, error: deployError, reset: resetDeploy } = useWriteContract()
+  const { isLoading: deployConfirming, isSuccess: deployConfirmed } = useWaitForTransactionReceipt({ hash: deployHash })
 
   if (tokenId === 0) return null
 
-  if (configuring) {
+  // --- Config mode ---
+  if (mode === 'config') {
     return (
       <div className="relative">
         <button
-          onClick={() => setConfiguring(false)}
+          onClick={() => setMode('view')}
           title="Back to portfolio"
           className="absolute top-4 right-4 z-10 p-1.5 rounded transition-colors"
           style={{ color: 'rgba(212,175,55,0.5)' }}
@@ -57,21 +82,167 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
     )
   }
 
+  // --- Rebalance mode ---
+  if (mode === 'rebalance') {
+    const erc20Count = config?.filter(a => a.assetType === 0).length ?? 0
+
+    async function handleQuote() {
+      if (!config || !publicClient) return
+      setQuoting(true)
+      setPreview(null)
+      resetRebalance()
+
+      // Fetch current ERC20 holdings
+      const erc20Assets = config.filter(a => a.assetType === 0)
+      const holdingResults = await Promise.all(
+        erc20Assets.map(a =>
+          publicClient.readContract({
+            address: CONTRACT_ADDRESS,
+            abi: SMARTFOLIO_ABI,
+            functionName: 'portfolioHoldings',
+            args: [id, a.token as `0x${string}`],
+          }).then(v => [a.token.toLowerCase(), v as bigint] as const).catch(() => [a.token.toLowerCase(), 0n] as const)
+        )
+      )
+      const holdings: Record<string, bigint> = Object.fromEntries(holdingResults)
+
+      const result = await buildRebalanceInstructions(
+        config.map(a => ({ ...a, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: '0x', sellSwapPath: (a as { sellSwapPath?: string }).sellSwapPath ?? '0x' })),
+        holdings,
+        WETH_ADDRESS,
+        publicClient,
+      )
+      setPreview(result)
+      setQuoting(false)
+    }
+
+    function handleExecute() {
+      if (!preview || preview.instructions.length === 0) return
+      resetRebalance()
+      writeRebalance({
+        address: CONTRACT_ADDRESS,
+        abi: SMARTFOLIO_ABI,
+        functionName: 'rebalance',
+        args: [
+          id,
+          preview.instructions.map(inst => ({
+            token:        inst.token as `0x${string}`,
+            isSell:       inst.isSell,
+            amountIn:     inst.amountIn,
+            amountOutMin: inst.amountOutMin,
+            poolFee:      inst.poolFee,
+            swapPath:     inst.swapPath as `0x${string}`,
+            sellSwapPath: inst.sellSwapPath as `0x${string}`,
+          })),
+        ],
+      })
+    }
+
+    return (
+      <div className="card space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-bold text-white">Rebalance ERC20s</h2>
+          <button
+            onClick={() => { setMode('view'); setPreview(null) }}
+            className="p-1.5 rounded"
+            style={{ color: 'rgba(212,175,55,0.5)' }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+
+        <p className="text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>
+          Sells all {erc20Count} ERC20 holdings → re-buys proportionally to current config weights.
+          SMF, AAVE, and LP slices are not touched.
+        </p>
+
+        {!preview && (
+          <button onClick={handleQuote} disabled={quoting} className="btn-outline-gold">
+            {quoting ? 'Getting quotes…' : 'Get Quote'}
+          </button>
+        )}
+
+        {preview?.error && (
+          <p className="text-sm" style={{ color: '#f87171' }}>{preview.error}</p>
+        )}
+
+        {preview && !preview.error && (
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <p className="stat-label">Sells</p>
+              {preview.sells.map((s, i) => (
+                <div key={i} className="flex justify-between text-sm rounded px-2.5 py-1.5" style={{ background: 'rgba(5,25,14,0.5)', border: '1px solid rgba(212,175,55,0.08)' }}>
+                  <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>{s.token.slice(0,10)}…</span>
+                  <span style={{ color: '#f87171' }}>→ ~{formatEther(s.estimatedWeth)} WETH</span>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-1">
+              <p className="stat-label">Buys</p>
+              {preview.buys.map((b, i) => (
+                <div key={i} className="flex justify-between text-sm rounded px-2.5 py-1.5" style={{ background: 'rgba(5,25,14,0.5)', border: '1px solid rgba(212,175,55,0.08)' }}>
+                  <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>{b.token.slice(0,10)}…</span>
+                  <span style={{ color: '#34d399' }}>{formatEther(b.amountIn)} WETH ({(b.weightBps / 100).toFixed(0)}%)</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={handleQuote} disabled={quoting} className="btn-outline-gold flex-1">
+                {quoting ? 'Refreshing…' : 'Refresh'}
+              </button>
+              <button
+                onClick={handleExecute}
+                disabled={rebalancePending || rebalanceConfirming || preview.instructions.length === 0}
+                className="btn-money flex-1"
+              >
+                {rebalancePending ? 'Confirm…' : rebalanceConfirming ? 'Rebalancing…' : 'Execute'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {rebalanceConfirmed && (
+          <p className="text-sm font-semibold" style={{ color: '#34d399' }}>
+            Rebalanced successfully.
+          </p>
+        )}
+        {rebalanceError && (
+          <p className="text-sm break-all" style={{ color: '#f87171' }}>Error: {rebalanceError.message}</p>
+        )}
+      </div>
+    )
+  }
+
+  // --- Normal view ---
   return (
     <div className="card space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-bold text-white">Portfolio</h2>
-        <button
-          onClick={() => setConfiguring(true)}
-          title="Configure portfolio"
-          className="p-1.5 rounded transition-colors"
-          style={{ color: 'rgba(212,175,55,0.4)' }}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="3"/>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-          </svg>
-        </button>
+        <div className="flex items-center gap-1">
+          {isHolder && hasErc20 && (
+            <button
+              onClick={() => { setMode('rebalance'); setPreview(null) }}
+              title="Rebalance ERC20 holdings"
+              className="p-1.5 rounded transition-colors text-xs font-semibold"
+              style={{ color: 'rgba(52,211,153,0.7)' }}
+            >
+              ⇄
+            </button>
+          )}
+          <button
+            onClick={() => setMode('config')}
+            title="Configure portfolio"
+            className="p-1.5 rounded transition-colors"
+            style={{ color: 'rgba(212,175,55,0.4)' }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Key stats */}
@@ -89,6 +260,37 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
           </p>
         </div>
       </div>
+
+      {/* Deploy reserve button — shown to holder when reserve > 0 */}
+      {isHolder && hasReserve && config && config.length > 0 && (
+        <div className="space-y-2">
+          <div className="box-info text-sm" style={{ color: 'rgba(255,255,255,0.55)' }}>
+            {formatEther(reserve!)} ETH in reserve — deploy it into the portfolio basket.
+          </div>
+          <button
+            onClick={() => {
+              resetDeploy()
+              const erc20Count = config.filter(a => a.assetType === 0).length
+              writeDeploy({
+                address: CONTRACT_ADDRESS,
+                abi: SMARTFOLIO_ABI,
+                functionName: 'deploy',
+                args: [id, Array(erc20Count).fill(0n), 0n, 0n, 0n, 0n],
+              })
+            }}
+            disabled={deployPending || deployConfirming}
+            className="btn-outline-gold w-full"
+          >
+            {deployPending ? 'Confirm…' : deployConfirming ? 'Deploying…' : 'Deploy Reserve'}
+          </button>
+          {deployConfirmed && (
+            <p className="text-sm font-semibold" style={{ color: '#34d399' }}>Reserve deployed.</p>
+          )}
+          {deployError && (
+            <p className="text-sm break-all" style={{ color: '#f87171' }}>Error: {deployError.message}</p>
+          )}
+        </div>
+      )}
 
       {/* Tier info */}
       {tierInfo !== undefined && smfWeightBps !== undefined && (

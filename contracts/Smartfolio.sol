@@ -141,14 +141,16 @@ contract Smartfolio is
     }
 
     function deploy(uint256 id, uint256[] calldata erc20MinAmounts, uint256 smfMinAmount, uint256 lpSwapAmountOutMin, uint256 lpAmount0Min, uint256 lpAmount1Min)
-        external onlyKeeper nonReentrant
+        external nonReentrant whenNotPaused
     {
+        if (msg.sender != keeper && balanceOf(msg.sender, id) == 0) revert NotAuthorized();
         _delegateTo(marketFacet);
     }
 
     function rebalance(uint256 id, RebalanceInstruction[] calldata instructions)
-        external onlyKeeper nonReentrant
+        external nonReentrant whenNotPaused
     {
+        if (msg.sender != keeper && balanceOf(msg.sender, id) == 0) revert NotAuthorized();
         _delegateTo(marketFacet);
     }
 

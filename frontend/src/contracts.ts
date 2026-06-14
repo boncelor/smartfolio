@@ -8,6 +8,36 @@ function resolveAddress(): `0x${string}` {
 
 export const CONTRACT_ADDRESS: `0x${string}` = resolveAddress()
 
+// Uniswap V3 QuoterV2 on Sepolia
+export const QUOTER_V2_ADDRESS: `0x${string}` = '0xEd1f6473345F45b75833fd55D5ADbEd9bBaB6b7'
+
+export const QUOTER_V2_ABI = [
+  {
+    name: 'quoteExactInputSingle',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      {
+        name: 'params',
+        type: 'tuple',
+        components: [
+          { name: 'tokenIn',           type: 'address' },
+          { name: 'tokenOut',          type: 'address' },
+          { name: 'amountIn',          type: 'uint256' },
+          { name: 'fee',               type: 'uint24'  },
+          { name: 'sqrtPriceLimitX96', type: 'uint160' },
+        ],
+      },
+    ],
+    outputs: [
+      { name: 'amountOut',                 type: 'uint256' },
+      { name: 'sqrtPriceX96After',         type: 'uint160' },
+      { name: 'initializedTicksCrossed',   type: 'uint32'  },
+      { name: 'gasEstimate',               type: 'uint256' },
+    ],
+  },
+] as const
+
 // SMF address — set VITE_SMF_ADDRESS after deploying SmartfolioERC20
 function resolveSMFAddress(): `0x${string}` {
   const envAddr = import.meta.env.VITE_SMF_ADDRESS as string | undefined

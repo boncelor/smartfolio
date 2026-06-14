@@ -859,8 +859,15 @@ contract("Smartfolio", (accounts) => {
         );
       });
 
-      it("reverts if called by non-keeper", async () => {
-        await expectRevert(sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: alice }), "not keeper");
+      it("reverts if called by non-holder non-keeper (owner has no tokens)", async () => {
+        // owner holds no TOKEN_ID and is not the keeper
+        await expectRevert(sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: owner }), "not authorized");
+      });
+
+      it("allows the NFT holder to call deploy", async () => {
+        // alice holds TOKEN_ID — auth passes, reserve > 0, deploy succeeds
+        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: alice });
+        assert.equal(await sf.portfolioActive(TOKEN_ID), true);
       });
 
       it("reverts if router is not set", async () => {
@@ -877,12 +884,16 @@ contract("Smartfolio", (accounts) => {
         await expectRevert(sf2.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper }), "router not set");
       });
 
-      it("blocks setPortfolioConfig once portfolio is active", async () => {
+      it("allows setPortfolioConfig even when portfolio is active", async () => {
         await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper });
-        await expectRevert(
-          sf.setPortfolioConfig(TOKEN_ID, buildAssets(tokenA.address, tokenB.address, owner), { from: owner }),
-          "portfolio is active"
+        // No longer blocked — owner can reconfigure at any time
+        await sf.setPortfolioConfig(
+          TOKEN_ID,
+          buildAssets(tokenA.address, tokenB.address, mockSMF.address),
+          { from: owner }
         );
+        const cfg = await sf.getPortfolioConfig(TOKEN_ID);
+        assert.equal(cfg.length, 3);
       });
 
       it("blocks burn() when portfolio is active", async () => {
@@ -941,11 +952,19 @@ contract("Smartfolio", (accounts) => {
         await expectRevert(sf.rebalance(TOKEN_ID, [], { from: keeper }), "no instructions");
       });
 
-      it("reverts if called by non-keeper", async () => {
+      it("reverts if called by non-holder non-keeper (owner has no tokens)", async () => {
         const instructions = [
           { token: tokenA.address, isSell: true, amountIn: 1, amountOutMin: 0, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
         ];
-        await expectRevert(sf.rebalance(TOKEN_ID, instructions, { from: alice }), "not keeper");
+        await expectRevert(sf.rebalance(TOKEN_ID, instructions, { from: owner }), "not authorized");
+      });
+
+      it("allows the NFT holder to rebalance", async () => {
+        const holding = new BN(await sf.portfolioHoldings(TOKEN_ID, tokenA.address));
+        const instructions = [
+          { token: tokenA.address, isSell: true, amountIn: holding.toString(), amountOutMin: 0, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
+        ];
+        await sf.rebalance(TOKEN_ID, instructions, { from: alice });
       });
     });
   });
