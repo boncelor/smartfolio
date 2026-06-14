@@ -235,7 +235,7 @@ The keeper calls `deploy(id, erc20MinAmounts, smfMinAmount, lpSwapAmountOutMin, 
 3. Per-slice dispatch:
    - **ERC20**: swaps the allocated WETH to `token` via Uniswap V3 using `erc20MinAmounts[i]`.
    - **AAVE**: deposits allocated WETH into Aave V3 via the shared proxy account (`defaultAavePool`). `portfolioAaveWeth[id]` records the deposited amount for per-ID accounting.
-   - **SMF**: unwraps WETH to ETH, then calls `buySMF{value: amountIn}(smfMinAmount)` on the SMF contract. The acquired SMF is held by the proxy and tracked in `portfolioSMFHoldings[id]`.
+   - **SMF**: unwraps WETH to ETH, then calls `buySMF{value: amountIn}(smfMinAmount)` on the SMF contract. The acquired SMF is held by the proxy and tracked in `portfolioSMFHoldings[id]`. If `smfMinAmount` is passed as `0`, the contract auto-computes a minimum using `ISMFToken.smfAmountForBuy(amountIn)` with a 1% slippage buffer.
    - **LP**: swaps half the allocated WETH to `token` via the swap router (`lpSwapAmountOutMin`), then mints a Uniswap V3 position (`lpAmount0Min`, `lpAmount1Min`). The position NFT is held by the proxy. Any token amounts unused by the position manager (current price ratio mismatch) are unwrapped back to ETH and added to `reserve[id]` as leftover.
 4. `portfolioActive[id]` is set to `true` (informational).
 
@@ -415,7 +415,8 @@ All three revert with `CallerNotSMFContract` if called by any other address. The
 
 | Function | Returns |
 |---|---|
-| `smfMintCost(amount)` | ETH cost to buy `amount` SMF |
+| `smfMintCost(amount)` | ETH cost to buy `amount` SMF (whole tokens) |
+| `smfAmountForBuy(ethAmount)` | Whole SMF tokens purchasable with `ethAmount` wei — inverse buy curve |
 | `smfBurnValue(amount)` | Net ETH received from selling `amount` SMF (after quadratic fee) |
 | `smfForNFT()` | `smfRequired` — simulate `mintNFT` cost from current on-chain state |
 | `smfForReserve(ethAmount)` | `smfRequired` — simulate `addETHToNFT` cost |

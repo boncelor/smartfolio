@@ -4,7 +4,6 @@ import { formatEther } from 'viem'
 import { CONTRACT_ADDRESS, SMARTFOLIO_ABI, SMF_ADDRESS, SMF_ABI } from '../contracts'
 import PortfolioConfigForm from './PortfolioConfigForm'
 import { buildRebalanceInstructions, type RebalancePreview } from '../utils/rebalanceInstructions'
-import { smfAmountForBuy } from '../utils/smfAmountForBuy'
 
 interface Props {
   tokenId: number
@@ -218,40 +217,16 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
               {formatEther(reserve)} ETH in reserve — deploy into the portfolio basket per config weights.
             </p>
             <button
-              onClick={async () => {
-                if (!config || !publicClient || reserve === undefined) return
+              onClick={() => {
+                if (!config || reserve === undefined) return
                 resetDeploy()
                 const erc20Count = config.filter(a => a.assetType === 0).length
-                const hasSMFSlice = config.some(a => a.assetType === 3)
-
-                let smfMinAmount = 0n
-                if (hasSMFSlice) {
-                  // Calculate SMF weight and how much ETH goes to the SMF slice
-                  const ethReserveBps = config
-                    .filter(a => a.assetType === 5)
-                    .reduce((s, a) => s + BigInt(a.weightBps), 0n)
-                  const smfWeightBpsVal = config
-                    .filter(a => a.assetType === 3)
-                    .reduce((s, a) => s + BigInt(a.weightBps), 0n)
-                  const ethToInvest = reserve - (reserve * ethReserveBps) / 10000n
-                  const ethForSMF = (ethToInvest * smfWeightBpsVal) / 10000n
-
-                  if (ethForSMF > 0n) {
-                    const [tiers, supply] = await Promise.all([
-                      publicClient.readContract({ address: SMF_ADDRESS, abi: SMF_ABI, functionName: 'getTiers' }).then(v => v as readonly { threshold: bigint; pricePerToken: bigint }[]),
-                      publicClient.readContract({ address: SMF_ADDRESS, abi: SMF_ABI, functionName: 'smfTotalSupply' }).then(v => v as bigint),
-                    ])
-                    // Apply 1% slippage: buy 1% fewer tokens to guard against price movement
-                    const raw = smfAmountForBuy(ethForSMF, tiers, supply)
-                    smfMinAmount = (raw * 99n) / 100n
-                  }
-                }
-
+                // smfMinAmount = 0 → contract auto-computes with 1% slippage on-chain
                 writeDeploy({
                   address: CONTRACT_ADDRESS,
                   abi: SMARTFOLIO_ABI,
                   functionName: 'deploy',
-                  args: [id, Array(erc20Count).fill(0n), smfMinAmount, 0n, 0n, 0n],
+                  args: [id, Array(erc20Count).fill(0n), 0n, 0n, 0n, 0n],
                 })
               }}
               disabled={deployPending || deployConfirming}

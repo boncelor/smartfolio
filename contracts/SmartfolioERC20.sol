@@ -186,8 +186,8 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
         if (msg.value < cost) revert InsufficientETH();
 
         smfTotalSupply += amount;
-        smfTotalMinted += amount;
-        _mint(msg.sender, amount);
+        smfTotalMinted += amount * 10**18;
+        _mint(msg.sender, amount * 10**18);
 
         emit SMFMinted(msg.sender, amount, cost);
 
@@ -209,7 +209,7 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
      */
     function sellSMF(uint256 amount, uint256 minEthOut) external nonReentrant {
         if (amount == 0) revert AmountZero();
-        if (balanceOf(msg.sender) < amount) revert InsufficientSMFBalance();
+        if (balanceOf(msg.sender) < amount * 10**18) revert InsufficientSMFBalance();
 
         uint256 gross = _ethForSmfAmount(amount);
         (uint256 fee, uint256 net) = _smfSellFee(amount, gross);
@@ -217,7 +217,7 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
         if (address(this).balance < gross) revert InsufficientETH();
 
         smfTotalSupply -= amount;
-        _burn(msg.sender, amount);
+        _burn(msg.sender, amount * 10**18);
 
         emit SMFBurned(msg.sender, amount, net);
 
@@ -296,10 +296,10 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
 
         uint256 smfToBurn = _smfAmountForEth(ethAmount);
         if (smfToBurn > maxSmfBurn) revert SlippageExceeded();
-        if (balanceOf(msg.sender) < smfToBurn) revert InsufficientSMFBalance();
+        if (balanceOf(msg.sender) < smfToBurn * 10**18) revert InsufficientSMFBalance();
 
         smfTotalSupply -= smfToBurn;
-        _burn(msg.sender, smfToBurn);
+        _burn(msg.sender, smfToBurn * 10**18);
 
         ISmartfolio(smartfolio).addReserve{value: ethAmount}(id);
 
@@ -354,6 +354,44 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
 
     function getTiers() external view returns (TierConfig[] memory) {
         return _tiers;
+    }
+
+    /**
+     * @notice Compute the number of whole SMF tokens purchasable with `ethAmount` wei,
+     *         given the current supply and tier configuration. Mirrors the buy-curve
+     *         inverse used by the keeper before calling deploy().
+     * @param ethAmount  ETH in wei to spend.
+     * @return amount    Whole SMF tokens receivable (floor, same unit as buySMF param).
+     */
+    function smfAmountForBuy(uint256 ethAmount) external view returns (uint256 amount) {
+        TierConfig[] storage tiers = _tiers;
+        if (tiers.length == 0) revert TiersNotConfigured();
+        if (ethAmount == 0) return 0;
+
+        uint256 supply = smfTotalSupply;
+        uint256 ethRemaining = ethAmount;
+        uint256 lastTier = tiers.length - 1;
+
+        for (uint256 i = 0; i < tiers.length && ethRemaining > 0; i++) {
+            uint256 price = tiers[i].pricePerToken;
+            if (price == 0) continue;
+
+            uint256 tokensInTier;
+            if (i < lastTier) {
+                uint256 tierCap = tiers[i].threshold;
+                if (supply >= tierCap) continue;
+                tokensInTier = tierCap - supply;
+            } else {
+                tokensInTier = ethRemaining / price; // open-ended last tier
+            }
+
+            uint256 maxEthInTier = tokensInTier * price;
+            uint256 ethToUse = ethRemaining < maxEthInTier ? ethRemaining : maxEthInTier;
+            uint256 bought = ethToUse / price;
+            amount += bought;
+            supply += bought;
+            ethRemaining -= bought * price;
+        }
     }
 
     // -------------------------------------------------------------------------
