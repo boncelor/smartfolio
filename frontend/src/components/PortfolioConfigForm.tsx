@@ -94,7 +94,9 @@ export default function PortfolioConfigForm({ tokenId }: Props) {
   function handleSubmit() {
     const assets = rows.map(r => ({
       assetType: r.assetType,
-      token:     (r.token || '0x0000000000000000000000000000000000000000') as `0x${string}`,
+      token:     (r.assetType === 3
+        ? (smfAddr as string) || r.token
+        : r.token || '0x0000000000000000000000000000000000000000') as `0x${string}`,
       weightBps: parseInt(r.weightBps) || 0,
       poolFee:   parseInt(r.poolFee) || 0,
       swapFee:   parseInt(r.swapFee) || 0,
