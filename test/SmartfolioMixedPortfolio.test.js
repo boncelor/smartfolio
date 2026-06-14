@@ -166,7 +166,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
 
     it("divests and returns ETH", async () => {
       await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper });
-      const tx = await sf.divest(TOKEN_ID, 10, 0, { from: alice });
+      const tx = await sf.divest(TOKEN_ID, 10, { from: alice });
       assert.ok(tx.logs.some(l => l.event === "Divested"));
       assert.equal(await sf.portfolioActive(TOKEN_ID), false);
     });
@@ -209,7 +209,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     it("divests: withdraws proportional WETH from Aave and returns ETH", async () => {
       await sf.deploy(TOKEN_ID, [], 0, 0, 0, 0, { from: keeper });
 
-      const tx = await sf.divest(TOKEN_ID, 10, 0, { from: alice });
+      const tx = await sf.divest(TOKEN_ID, 10, { from: alice });
       assert.ok(tx.logs.some(l => l.event === "Divested"));
       assert.ok(tx.logs.some(l => l.event === "PortfolioAaveDivested"));
 
@@ -222,7 +222,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
       await sf.deploy(TOKEN_ID, [], 0, 0, 0, 0, { from: keeper });
       const aaveBefore = new BN(await sf.portfolioAaveWeth(TOKEN_ID));
 
-      await sf.divest(TOKEN_ID, 5, 0, { from: alice }); // 50%
+      await sf.divest(TOKEN_ID, 5, { from: alice }); // 50%
 
       const aaveAfter = new BN(await sf.portfolioAaveWeth(TOKEN_ID));
       assert.equal(
@@ -265,7 +265,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     it("divests: removes LP position and returns ETH", async () => {
       await sf.deploy(TOKEN_ID, [], 0, 0, 0, 0, { from: keeper });
 
-      const tx = await sf.divest(TOKEN_ID, 10, 0, { from: alice });
+      const tx = await sf.divest(TOKEN_ID, 10, { from: alice });
       assert.ok(tx.logs.some(l => l.event === "Divested"));
       assert.ok(tx.logs.some(l => l.event === "PortfolioLPDivested"));
 
@@ -276,7 +276,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
       await sf.deploy(TOKEN_ID, [], 0, 0, 0, 0, { from: keeper });
       const lpBefore = new BN((await sf.getPortfolioLPInfo(TOKEN_ID)).liquidity);
 
-      await sf.divest(TOKEN_ID, 5, 0, { from: alice }); // 50%
+      await sf.divest(TOKEN_ID, 5, { from: alice }); // 50%
 
       const lpAfter = new BN((await sf.getPortfolioLPInfo(TOKEN_ID)).liquidity);
       assert.ok(lpAfter.lt(lpBefore), "liquidity should decrease after partial divest");
@@ -333,7 +333,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     it("full divest returns ETH from all three slices and resets active", async () => {
       await sf.deploy(TOKEN_ID, [0], 0, 0, 0, 0, { from: keeper });
 
-      const tx = await sf.divest(TOKEN_ID, 10, 0, { from: alice });
+      const tx = await sf.divest(TOKEN_ID, 10, { from: alice });
       assert.ok(tx.logs.some(l => l.event === "Divested"));
       assert.ok(tx.logs.some(l => l.event === "PortfolioAaveDivested"));
       assert.ok(tx.logs.some(l => l.event === "PortfolioLPDivested"));
@@ -351,17 +351,12 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
       await sf.deploy(TOKEN_ID, [0], 0, 0, 0, 0, { from: keeper });
 
       // Alice divests her 10 (50% of supply=20)
-      await sf.divest(TOKEN_ID, 10, 0, { from: alice });
+      await sf.divest(TOKEN_ID, 10, { from: alice });
       assert.equal(await sf.portfolioActive(TOKEN_ID), true, "still active after partial divest");
 
       // Bob divests his 10 (remaining 100%)
-      await sf.divest(TOKEN_ID, 10, 0, { from: bob });
+      await sf.divest(TOKEN_ID, 10, { from: bob });
       assert.equal(await sf.portfolioActive(TOKEN_ID), false, "inactive after full exit");
-    });
-
-    it("reverts minEthOut not met", async () => {
-      await sf.deploy(TOKEN_ID, [0], 0, 0, 0, 0, { from: keeper });
-      await expectRevert(sf.divest(TOKEN_ID, 10, toWei("999"), { from: alice }));
     });
 
     it("erc20MinAmounts length must match ERC20 slot count", async () => {
@@ -374,7 +369,7 @@ contract("SmartfolioMixedPortfolio", (accounts) => {
     it("globalTotalSupply decreases on divest", async () => {
       await sf.deploy(TOKEN_ID, [0], 0, 0, 0, 0, { from: keeper });
       const before = new BN(await sf.globalTotalSupply());
-      await sf.divest(TOKEN_ID, 5, 0, { from: alice });
+      await sf.divest(TOKEN_ID, 5, { from: alice });
       const after = new BN(await sf.globalTotalSupply());
       assert.equal(before.sub(after).toString(), "5");
     });

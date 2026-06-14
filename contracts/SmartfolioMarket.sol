@@ -231,7 +231,7 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
         emit Rebalanced(id);
     }
 
-    function divest(uint256 id, uint256 amount, uint256 minEthOut) external {
+    function divest(uint256 id, uint256 amount) external {
         if (!portfolioActive[id]) revert PortfolioNotActive();
         if (amount == 0) revert AmountZero();
         if (balanceOf(msg.sender, id) < amount) revert InsufficientBalance();
@@ -250,21 +250,20 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
 
         _burn(msg.sender, id, amount);
 
-        uint256 wethReceived;
-        uint256 ethFromSMF;
+        uint256 totalEthOut = ethFromReserve;
 
         for (uint256 i = 0; i < assets.length; i++) {
             PortfolioAsset storage asset = assets[i];
 
             if (asset.assetType == AssetType.ERC20) {
+                // Transfer ERC20 tokens directly — no swap
                 uint256 tokenAmt = (portfolioHoldings[id][asset.token] * amount) / supply;
                 if (tokenAmt == 0) continue;
                 portfolioHoldings[id][asset.token] -= tokenAmt;
-                wethReceived += _swapTokenForWETH(
-                    asset.token, tokenAmt, 0, asset.poolFee, asset.sellSwapPath
-                );
+                IERC20(asset.token).transfer(msg.sender, tokenAmt);
 
             } else if (asset.assetType == AssetType.AAVE) {
+                // Withdraw WETH from Aave, unwrap to ETH
                 if (portfolioAaveWeth[id] == 0) continue;
                 uint256 wethToWithdraw = (portfolioAaveWeth[id] * amount) / supply;
                 if (wethToWithdraw == 0) continue;
@@ -272,43 +271,40 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
                 uint256 withdrawn = IPortfolioAavePool(defaultAavePool).withdraw(
                     address(weth), wethToWithdraw, address(this)
                 );
-                wethReceived += withdrawn;
+                weth.withdraw(withdrawn);
+                totalEthOut += withdrawn;
                 emit PortfolioAaveDivested(id, withdrawn);
 
             } else if (asset.assetType == AssetType.SMF) {
-                // Sell pro-rata SMF tokens via bonding curve; ETH lands in this contract.
+                // Transfer SMF tokens directly — no bonding curve sell
                 if (portfolioSMFHoldings[id] == 0) continue;
                 uint256 smfAmt = (portfolioSMFHoldings[id] * amount) / supply;
                 if (smfAmt == 0) continue;
                 portfolioSMFHoldings[id] -= smfAmt;
-                uint256 ethBefore = address(this).balance;
-                ISMFToken(smfContract).sellSMF(smfAmt, 0);
-                ethFromSMF += address(this).balance - ethBefore;
+                address smfAddr = smfContractForNFT[id] != address(0) ? smfContractForNFT[id] : smfContract;
+                IERC20(smfAddr).transfer(msg.sender, smfAmt);
 
             } else {
-                // LP
+                // LP: remove liquidity, unwrap WETH→ETH, transfer tokenB directly
                 if (portfolioLpLiquidity[id] == 0) continue;
-                uint256 lpWeth = _divestPortfolioLP(id, amount, supply);
-                wethReceived += lpWeth;
+                totalEthOut += _divestPortfolioLP(id, amount, supply, msg.sender);
             }
         }
 
-        if (wethReceived > 0) weth.withdraw(wethReceived);
+        emit Divested(msg.sender, id, amount, totalEthOut);
 
-        uint256 totalEth = wethReceived + ethFromReserve + ethFromSMF;
-        if (totalEth < minEthOut) revert InsufficientETHOut();
-
-        emit Divested(msg.sender, id, amount, totalEth);
-
-        (bool ok, ) = msg.sender.call{value: totalEth}("");
-        if (!ok) revert ETHTransferFailed();
+        if (totalEthOut > 0) {
+            (bool ok, ) = msg.sender.call{value: totalEthOut}("");
+            if (!ok) revert ETHTransferFailed();
+        }
     }
 
     function _divestPortfolioLP(
         uint256 id,
         uint256 amount,
-        uint256 supply
-    ) internal returns (uint256 wethOut) {
+        uint256 supply,
+        address recipient
+    ) internal returns (uint256 ethOut) {
         uint128 liquidityToRemove = (supply == amount)
             ? portfolioLpLiquidity[id]
             : uint128((uint256(portfolioLpLiquidity[id]) * amount) / supply);
@@ -340,32 +336,18 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
         uint256 wethAmt   = isToken0Weth ? collected0 : collected1;
         uint256 tokenBAmt = isToken0Weth ? collected1 : collected0;
 
-        // Get tokenB address from config
-        PortfolioAsset[] storage assets = _getPortfolioConfig(id);
-        address tokenB;
-        uint24  swapFee;
-        for (uint256 i = 0; i < assets.length; i++) {
-            if (assets[i].assetType == AssetType.LP) {
-                tokenB  = assets[i].token;
-                swapFee = assets[i].swapFee;
-                break;
-            }
-        }
+        // Unwrap WETH → ETH (returned to caller as part of totalEthOut)
+        if (wethAmt > 0) weth.withdraw(wethAmt);
 
-        if (tokenBAmt > 0 && tokenB != address(0)) {
-            IERC20(tokenB).approve(address(swapRouter), tokenBAmt);
-            wethAmt += swapRouter.exactInputSingle(
-                ISwapRouter.ExactInputSingleParams({
-                    tokenIn:           tokenB,
-                    tokenOut:          address(weth),
-                    fee:               swapFee,
-                    recipient:         address(this),
-                    deadline:          block.timestamp,
-                    amountIn:          tokenBAmt,
-                    amountOutMinimum:  0,
-                    sqrtPriceLimitX96: 0
-                })
-            );
+        // Transfer tokenB directly to recipient — no swap
+        if (tokenBAmt > 0) {
+            PortfolioAsset[] storage assets = _getPortfolioConfig(id);
+            for (uint256 i = 0; i < assets.length; i++) {
+                if (assets[i].assetType == AssetType.LP) {
+                    IERC20(assets[i].token).transfer(recipient, tokenBAmt);
+                    break;
+                }
+            }
         }
 
         emit PortfolioLPDivested(id, wethAmt);

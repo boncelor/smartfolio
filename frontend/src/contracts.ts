@@ -320,7 +320,6 @@ export const SMARTFOLIO_ABI = [
     inputs: [
       { name: 'id', type: 'uint256' },
       { name: 'amount', type: 'uint256' },
-      { name: 'minEthOut', type: 'uint256' },
     ],
     outputs: [],
   },

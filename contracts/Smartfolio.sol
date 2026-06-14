@@ -152,7 +152,7 @@ contract Smartfolio is
         _delegateTo(marketFacet);
     }
 
-    function divest(uint256 id, uint256 amount, uint256 minEthOut)
+    function divest(uint256 id, uint256 amount)
         external nonReentrant whenNotPaused
     {
         _delegateTo(marketFacet);

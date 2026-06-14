@@ -145,7 +145,7 @@ Leverage tokens are not explicitly blocked by `burn()`. However, leverage tokens
 
 `withdrawSMF(id)` is available only when `portfolioActive[id] == false`. It burns the ERC1155 token (exactly 1) and transfers the full `portfolioSMFHoldings[id]` balance directly back to the caller as SMF tokens — no ETH conversion, no bonding curve interaction, no fee. Any ETH in `reserve[id]` is also returned.
 
-NFTs minted via `mintWithSMF` have `portfolioActive[id] = true` from the moment they are created (the SMF is already inside the portfolio at mint time), so `withdrawSMF` is not reachable for them. Holders of these NFTs exit via `divest()`, which sells their SMF slice back through the bonding curve and returns ETH.
+NFTs minted via `mintWithSMF` have `portfolioActive[id] = true` from the moment they are created (the SMF is already inside the portfolio at mint time), so `withdrawSMF` is not reachable for them. Holders of these NFTs exit via `divest()`, which transfers their SMF slice directly back to them as SMF tokens.
 
 ---
 
@@ -221,7 +221,7 @@ Weights across all slice types must sum to exactly 10,000 bps.
 4. Keeper: deploy(id, erc20MinAmounts, smfMinAmount, lpSwapMin, lp0Min, lp1Min)
                                                              — reserve ETH → basket
 5. Keeper: rebalance(id, instructions)                       — ERC20 slices only
-6. User:   divest(id, amount, minEthOut)                     — pro-rata basket → ETH
+6. User:   divest(id, amount)                                — pro-rata basket → assets in-kind
 ```
 
 After `deploy()`, `portfolioActive[id]` is set to `true` and `reserve[id]` is zeroed. The six-parameter signature separates slippage guards by slice type: `erc20MinAmounts` is an array covering ERC20 slices in order; `smfMinAmount` is the minimum SMF expected from the bonding curve buy; the three LP parameters guard the V3 position mint.
@@ -263,7 +263,7 @@ The AAVE slice is the protocol's collateral layer, designed in two phases:
 
 When the keeper deploys a portfolio with an AAVE slice, the allocated WETH is deposited into Aave V3 as collateral via the shared proxy account. `portfolioAaveWeth[id]` records the deposited amount for pro-rata withdrawal on divest. No borrowing occurs — the health factor is effectively infinite for collateral-only positions.
 
-On divest, `portfolioAaveWeth[id] × amount / supply` WETH is withdrawn from Aave and returned to the holder as ETH.
+On divest, `portfolioAaveWeth[id] × amount / supply` WETH is withdrawn from Aave, unwrapped, and returned to the holder as ETH.
 
 **Phase 2 (planned): Keeper-driven borrowing**
 
@@ -280,16 +280,15 @@ All AAVE slices across all portfolio IDs share a single Aave account at the prox
 
 ### 4.9 Divest
 
-A holder calls `divest(id, amount, minEthOut)`. The contract dispatches per slice type using a pre-computed `supply` snapshot (before the burn reduces it):
+A holder calls `divest(id, amount)`. Assets are returned in-kind — no swaps occur. The contract dispatches per slice type using a pre-computed `supply` snapshot (before the burn reduces it):
 
-- **SMF**: sells `portfolioSMFHoldings[id] × amount / supply` SMF back to ETH via `sellSMF()` on the bonding curve.
-- **ERC20**: sells `holdings × amount / supply` of each token back to WETH via Uniswap.
-- **AAVE**: withdraws `portfolioAaveWeth[id] × amount / supply` WETH from Aave.
-- **LP**: removes `lpLiquidity × amount / supply` liquidity from the V3 position. The last holder receives all remaining liquidity to avoid dust. Collected tokenB is swapped to WETH.
+- **SMF**: transfers `portfolioSMFHoldings[id] × amount / supply` SMF tokens directly to the caller.
+- **ERC20**: transfers `holdings × amount / supply` of each ERC20 token directly to the caller.
+- **AAVE**: withdraws `portfolioAaveWeth[id] × amount / supply` WETH from Aave, unwraps to ETH, and sends ETH to the caller.
+- **LP**: removes `lpLiquidity × amount / supply` liquidity from the V3 position. Collected WETH is unwrapped to ETH and sent to the caller; collected tokenB is transferred directly.
+- **Reserve**: any proportional share of `reserve[id]` (undeployed leftover or fee income) is sent as ETH.
 
-All WETH is unwrapped and combined with the proportional share of `reserve[id]` (undeployed leftovers and collected fees). The total ETH is sent to the caller. Reverts if below `minEthOut`.
-
-No burn fee applies. When all tokens have been divested, `portfolioActive[id]` resets and the owner may reconfigure the basket.
+No swaps, no bonding curve interaction, no fee. The holder receives their pro-rata slice of every asset exactly as held. When all tokens have been divested, `portfolioActive[id]` resets and the owner may reconfigure the basket.
 
 ### 4.10 Rebalancing
 

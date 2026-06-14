@@ -1021,20 +1021,18 @@ contract("Smartfolio", (accounts) => {
     }
 
     describe("divest", () => {
-      it("burns tokens, sells ERC20s, returns ETH, emits Divested", async () => {
+      it("burns tokens, transfers ERC20s directly, emits Divested", async () => {
         const deployedAmount = await sf.deployedEth(TOKEN_ID);
         const { a: holdingA, b: holdingB } = await expectedHoldings(deployedAmount);
 
-        const supplyBefore = await sf.totalSupply(TOKEN_ID);
-        const ethBefore    = new BN(await web3.eth.getBalance(alice));
+        const supplyBefore      = await sf.totalSupply(TOKEN_ID);
+        const tokenABefore      = new BN(await tokenA.balanceOf(alice));
+        const tokenBBefore      = new BN(await tokenB.balanceOf(alice));
 
         // Divest half (50 of 100 tokens)
-        const tx = await sf.divest(TOKEN_ID, 50, 0, { from: alice });
-        const gasUsed  = new BN(tx.receipt.gasUsed);
-        const gasPrice = new BN(tx.receipt.effectiveGasPrice || (await web3.eth.getGasPrice()));
+        const tx = await sf.divest(TOKEN_ID, 50, { from: alice });
 
         const supplyAfter = await sf.totalSupply(TOKEN_ID);
-        const ethAfter    = new BN(await web3.eth.getBalance(alice));
 
         // Supply reduced
         assert.equal(supplyAfter.toString(), new BN(supplyBefore).subn(50).toString());
@@ -1042,7 +1040,7 @@ contract("Smartfolio", (accounts) => {
         // ERC1155 balance reduced
         assert.equal((await sf.balanceOf(alice, TOKEN_ID)).toString(), "50");
 
-        // Holdings reduced by 50%
+        // Portfolio holdings reduced by 50%
         assert.equal(
           (await sf.portfolioHoldings(TOKEN_ID, tokenA.address)).toString(),
           holdingA.divn(2).toString()
@@ -1052,21 +1050,22 @@ contract("Smartfolio", (accounts) => {
           holdingB.divn(2).toString()
         );
 
-        // Alice received ETH (net of gas)
-        const ethReceived = ethAfter.sub(ethBefore).add(gasUsed.mul(gasPrice));
-        assert.ok(ethReceived.gt(new BN(0)), "Alice should receive ETH");
+        // Alice received the ERC20 tokens directly
+        const tokenAAfter = new BN(await tokenA.balanceOf(alice));
+        const tokenBAfter = new BN(await tokenB.balanceOf(alice));
+        assert.ok(tokenAAfter.gt(tokenABefore), "Alice should receive tokenA");
+        assert.ok(tokenBAfter.gt(tokenBBefore), "Alice should receive tokenB");
 
-        // Event
+        // Event emitted
         const log = tx.logs.find((l) => l.event === "Divested");
         assert.ok(log);
         assert.equal(log.args.account, alice);
         assert.equal(log.args.id.toString(), TOKEN_ID.toString());
         assert.equal(log.args.amount.toString(), "50");
-        assert.equal(log.args.ethReceived.toString(), ethReceived.toString());
       });
 
       it("full divest: all tokens burned, portfolioActive resets to false", async () => {
-        await sf.divest(TOKEN_ID, 100, 0, { from: alice });
+        await sf.divest(TOKEN_ID, 100, { from: alice });
 
         assert.equal((await sf.totalSupply(TOKEN_ID)).toString(), "0");
         assert.equal((await sf.balanceOf(alice, TOKEN_ID)).toString(), "0");
@@ -1082,7 +1081,7 @@ contract("Smartfolio", (accounts) => {
       });
 
       it("after full divest owner can reconfigure and redeploy", async () => {
-        await sf.divest(TOKEN_ID, 100, 0, { from: alice });
+        await sf.divest(TOKEN_ID, 100, { from: alice });
 
         // Can set new config now that portfolio is inactive
         await sf.setPortfolioConfig(
@@ -1110,7 +1109,7 @@ contract("Smartfolio", (accounts) => {
         const supply = new BN(await sf.totalSupply(TOKEN_ID)); // 200
 
         // Alice divests her 100 (50% of supply)
-        await sf.divest(TOKEN_ID, 100, 0, { from: alice });
+        await sf.divest(TOKEN_ID, 100, { from: alice });
 
         const holdingAAfter = new BN(await sf.portfolioHoldings(TOKEN_ID, tokenA.address));
         // tokenA holdings should have decreased by 50%
@@ -1123,29 +1122,23 @@ contract("Smartfolio", (accounts) => {
         assert.equal((await sf.balanceOf(bob, TOKEN_ID)).toString(), "100");
       });
 
-      it("receives ETH equal to sold ERC20 value (1:1 mock rate)", async () => {
-        const deployedAmount = await sf.deployedEth(TOKEN_ID);
-        // 1:1 rate: total ETH received ≈ deployedAmount (minus any rounding)
-        const ethBefore = new BN(await web3.eth.getBalance(alice));
-        const tx = await sf.divest(TOKEN_ID, 100, 0, { from: alice });
-        const gasUsed  = new BN(tx.receipt.gasUsed);
-        const gasPrice = new BN(tx.receipt.effectiveGasPrice || (await web3.eth.getGasPrice()));
-        const ethAfter = new BN(await web3.eth.getBalance(alice));
-        const received = ethAfter.sub(ethBefore).add(gasUsed.mul(gasPrice));
-        // Should be very close to deployedAmount (within 2 wei of rounding)
-        const diff = new BN(deployedAmount).sub(received).abs();
-        assert.ok(diff.lten(2), `Expected ~${deployedAmount} ETH, got ${received}`);
+      it("receives ERC20 tokens equal to portfolio holdings on full divest", async () => {
+        const holdingA = new BN(await sf.portfolioHoldings(TOKEN_ID, tokenA.address));
+        const holdingB = new BN(await sf.portfolioHoldings(TOKEN_ID, tokenB.address));
+
+        const tokenABefore = new BN(await tokenA.balanceOf(alice));
+        const tokenBBefore = new BN(await tokenB.balanceOf(alice));
+
+        await sf.divest(TOKEN_ID, 100, { from: alice });
+
+        const tokenAReceived = new BN(await tokenA.balanceOf(alice)).sub(tokenABefore);
+        const tokenBReceived = new BN(await tokenB.balanceOf(alice)).sub(tokenBBefore);
+
+        assert.equal(tokenAReceived.toString(), holdingA.toString(), "Alice should receive all tokenA");
+        assert.equal(tokenBReceived.toString(), holdingB.toString(), "Alice should receive all tokenB");
       });
 
-      it("reverts if minEthOut is not met", async () => {
-        const deployedAmount = await sf.deployedEth(TOKEN_ID);
-        // Demand more ETH than the portfolio is worth
-        const tooMuch = new BN(deployedAmount).muln(10);
-        await expectRevert(
-          sf.divest(TOKEN_ID, 100, tooMuch, { from: alice }),
-          "insufficient ETH out"
-        );
-      });
+
 
       it("reverts if portfolio is not active", async () => {
         // Deploy a fresh token ID that has never been deployed
@@ -1159,33 +1152,33 @@ contract("Smartfolio", (accounts) => {
         const cost = await sf.mintCost(1);
         await mockSMF.mintFundedOnBehalf(sf.address, alice, OTHER_ID, 1, { from: owner, value: cost });
         await expectRevert(
-          sf.divest(OTHER_ID, 1, 0, { from: alice }),
+          sf.divest(OTHER_ID, 1, { from: alice }),
           "portfolio not active"
         );
       });
 
       it("reverts if balance is insufficient", async () => {
         await expectRevert(
-          sf.divest(TOKEN_ID, 101, 0, { from: alice }),
+          sf.divest(TOKEN_ID, 101, { from: alice }),
           "insufficient balance"
         );
       });
 
       it("reverts if amount is zero", async () => {
         await expectRevert(
-          sf.divest(TOKEN_ID, 0, 0, { from: alice }),
+          sf.divest(TOKEN_ID, 0, { from: alice }),
           "amount must be > 0"
         );
       });
 
       it("reverts when paused", async () => {
         await sf.pause({ from: owner });
-        await expectRevert(sf.divest(TOKEN_ID, 1, 0, { from: alice }), "EnforcedPause");
+        await expectRevert(sf.divest(TOKEN_ID, 1, { from: alice }), "EnforcedPause");
       });
 
       it("deployedEth decreases proportionally", async () => {
         const deployedBefore = new BN(await sf.deployedEth(TOKEN_ID));
-        await sf.divest(TOKEN_ID, 50, 0, { from: alice }); // 50% exit
+        await sf.divest(TOKEN_ID, 50, { from: alice }); // 50% exit
         const deployedAfter = new BN(await sf.deployedEth(TOKEN_ID));
         // Should be ~50% of original (within 1 wei rounding)
         const expected = deployedBefore.divn(2);

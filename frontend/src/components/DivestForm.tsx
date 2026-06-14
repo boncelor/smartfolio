@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi'
-import { formatEther } from 'viem'
 import { CONTRACT_ADDRESS, SMARTFOLIO_ABI } from '../contracts'
 
 interface Props {
@@ -9,41 +8,15 @@ interface Props {
 
 export default function DivestForm({ tokenId }: Props) {
   const [amount, setAmount] = useState('')
-  const [slippage, setSlippage] = useState('0.5')
   const { address, isConnected } = useAccount()
 
   const parsedAmount = parseInt(amount) || 0
   const isValidAmount = parsedAmount > 0
-  const slippagePercent = parseFloat(slippage) || 0.5
 
   const { data: portfolioActive } = useReadContract({
     address: CONTRACT_ADDRESS,
     abi: SMARTFOLIO_ABI,
     functionName: 'portfolioActive',
-    args: [BigInt(tokenId)],
-    query: { enabled: tokenId > 0 },
-  })
-
-  const { data: deployedEth } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: SMARTFOLIO_ABI,
-    functionName: 'deployedEth',
-    args: [BigInt(tokenId)],
-    query: { enabled: tokenId > 0 },
-  })
-
-  const { data: reserve } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: SMARTFOLIO_ABI,
-    functionName: 'reserve',
-    args: [BigInt(tokenId)],
-    query: { enabled: tokenId > 0 },
-  })
-
-  const { data: totalSupply } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: SMARTFOLIO_ABI,
-    functionName: 'totalSupply',
     args: [BigInt(tokenId)],
     query: { enabled: tokenId > 0 },
   })
@@ -63,24 +36,13 @@ export default function DivestForm({ tokenId }: Props) {
   const { isLoading: isConfirming, isSuccess: isConfirmed } =
     useWaitForTransactionReceipt({ hash: txHash })
 
-  let estimatedEth: bigint | null = null
-  if (isValidAmount && deployedEth !== undefined && reserve !== undefined && totalSupply !== undefined && totalSupply > 0n) {
-    estimatedEth = (BigInt(parsedAmount) * (deployedEth + reserve)) / totalSupply
-  }
-
-  let minEthOut: bigint = 0n
-  if (estimatedEth !== null && estimatedEth > 0n) {
-    const slippageBps = BigInt(Math.round(slippagePercent * 100))
-    minEthOut = (estimatedEth * (10000n - slippageBps)) / 10000n
-  }
-
   function handleDivest() {
     if (!isValidAmount) return
     writeContract({
       address: CONTRACT_ADDRESS,
       abi: SMARTFOLIO_ABI,
       functionName: 'divest',
-      args: [BigInt(tokenId), BigInt(parsedAmount), minEthOut],
+      args: [BigInt(tokenId), BigInt(parsedAmount)],
     })
   }
 
@@ -125,34 +87,6 @@ export default function DivestForm({ tokenId }: Props) {
           )}
         </div>
       </div>
-
-      <div className="space-y-1">
-        <label className="stat-label">Slippage tolerance (%)</label>
-        <input
-          type="number"
-          min={0.01}
-          max={50}
-          step={0.1}
-          value={slippage}
-          onChange={(e) => setSlippage(e.target.value)}
-          className="input-money"
-          style={{ width: '8rem' }}
-        />
-        <p className="text-xs" style={{ color: 'rgba(255,255,255,0.25)' }}>Applied as minEthOut slippage guard. Estimate excludes SMF bonding curve value.</p>
-      </div>
-
-      {estimatedEth !== null && (
-        <div className="box-info space-y-2 text-sm">
-          <div className="flex justify-between">
-            <span className="stat-label" style={{ marginBottom: 0 }}>Estimated ETH out</span>
-            <span className="text-white font-medium">{formatEther(estimatedEth)} ETH</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="stat-label" style={{ marginBottom: 0 }}>Min ETH ({slippagePercent}% slippage)</span>
-            <span className="font-bold text-gold">{formatEther(minEthOut)} ETH</span>
-          </div>
-        </div>
-      )}
 
       <button onClick={handleDivest} disabled={isDisabled} className="btn-money">
         {isWritePending ? 'Confirm in wallet…' : isConfirming ? 'Divesting…' : 'Divest'}

@@ -42,7 +42,7 @@ export default function ExitForm({ tokenId }: Props) {
 
   function handleDivest() {
     resetDivest()
-    writeDivest({ address: CONTRACT_ADDRESS, abi: SMARTFOLIO_ABI, functionName: 'divest', args: [id, 1n, 0n] })
+    writeDivest({ address: CONTRACT_ADDRESS, abi: SMARTFOLIO_ABI, functionName: 'divest', args: [id, 1n] })
   }
 
   if (!isConnected) {
@@ -78,7 +78,7 @@ export default function ExitForm({ tokenId }: Props) {
         )}
         {active === true && (
           <div className="box-info text-sm" style={{ color: 'rgba(255,255,255,0.6)' }}>
-            All deployed assets will be unwound and returned as ETH.
+            Assets returned in-kind: SMF and ERC20 tokens transferred directly, AAVE and LP positions unwound to ETH.
           </div>
         )}
       </div>
@@ -106,7 +106,7 @@ export default function ExitForm({ tokenId }: Props) {
 
       {confirmed && (
         <p className="text-sm font-semibold" style={{ color: '#34d399' }}>
-          {withdrawConfirmed ? 'SMF returned to your wallet.' : 'Assets divested successfully.'}
+          {withdrawConfirmed ? 'SMF returned to your wallet.' : 'Assets transferred successfully.'}
         </p>
       )}
       {anyError && (
