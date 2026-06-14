@@ -12,13 +12,13 @@ module.exports = async function (callback) {
 
     const proxy = await Smartfolio.at(PROXY);
 
-    // 1. New proxy implementation (updated divest signature — removes minEthOut)
+    // 1. New proxy implementation (setPortfolioConfig no longer gated on portfolioActive)
     const newImpl = await Smartfolio.new({ from: owner });
     console.log("✓ New Smartfolio implementation:", newImpl.address);
     await proxy.upgradeToAndCall(newImpl.address, "0x", { from: owner });
     console.log("✓ Proxy upgraded");
 
-    // 2. New market facet (in-kind divest: transfers assets directly)
+    // 2. New market facet (deploy/rebalance/divest no longer gated on portfolioActive)
     const market = await SmartfolioMarket.new({ from: owner });
     console.log("✓ New SmartfolioMarket:", market.address);
 
@@ -31,7 +31,7 @@ module.exports = async function (callback) {
     await proxy.unpause({ from: owner });
     console.log("✓ Proxy unpaused");
 
-    console.log("\nDone — market upgraded. divest() now transfers assets in-kind.");
+    console.log("\nDone — market upgraded. portfolioActive no longer gates setPortfolioConfig, deploy, rebalance, or divest.");
     callback();
   } catch (e) {
     callback(e);
