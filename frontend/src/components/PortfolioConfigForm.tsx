@@ -58,14 +58,6 @@ export default function PortfolioConfigForm({ tokenId }: Props) {
     functionName: 'smfContract',
   })
 
-  const { data: portfolioActive } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: SMARTFOLIO_ABI,
-    functionName: 'portfolioActive',
-    args: [BigInt(tokenId)],
-    query: { enabled: tokenId > 0 },
-  })
-
   const isOwner = isConnected && address?.toLowerCase() === (ownerAddr as string | undefined)?.toLowerCase()
 
   const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract()
@@ -127,12 +119,6 @@ export default function PortfolioConfigForm({ tokenId }: Props) {
         <h2 className="text-base font-bold text-white">Configure Portfolio</h2>
         <span className="badge-gold">Owner Only</span>
       </div>
-
-      {portfolioActive && (
-        <div className="box-warning">
-          Portfolio is currently <strong>active</strong>. Divest all positions before reconfiguring.
-        </div>
-      )}
 
       {/* Asset rows */}
       <div className="space-y-3">
@@ -348,7 +334,7 @@ export default function PortfolioConfigForm({ tokenId }: Props) {
 
       <button
         onClick={handleSubmit}
-        disabled={!weightOk || !smfOk || !lpTierOk || !lvTierOk || isPending || isConfirming || !!portfolioActive}
+        disabled={!weightOk || !smfOk || !lpTierOk || !lvTierOk || isPending || isConfirming}
         className="btn-gold"
       >
         {isPending ? 'Confirm in wallet…' : isConfirming ? 'Saving…' : 'Set Portfolio Config'}
