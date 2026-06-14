@@ -90,17 +90,35 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
 
         uint256 ethToSwap = reserve[id];
         reserve[id]       = 0;
-        deployedEth[id]   = ethToSwap;
         portfolioActive[id] = true;
 
-        weth.deposit{value: ethToSwap}();
+        // ETH slice stays in reserve — calculate how much to keep back
+        uint256 ethReserveBps = 0;
+        for (uint256 i = 0; i < assets.length; i++) {
+            if (assets[i].assetType == AssetType.ETH) ethReserveBps += assets[i].weightBps;
+        }
+        uint256 ethForReserve = (ethToSwap * ethReserveBps) / 10_000;
+        uint256 ethToInvest   = ethToSwap - ethForReserve;
 
-        uint256 wethRemaining = ethToSwap;
+        if (ethForReserve > 0) reserve[id] = ethForReserve;
+        deployedEth[id] = ethToInvest;
+
+        if (ethToInvest > 0) weth.deposit{value: ethToInvest}();
+
+        // Find index of the last non-ETH asset (receives remaining WETH to avoid dust)
+        uint256 lastNonEthIdx = 0;
+        for (uint256 i = 0; i < assets.length; i++) {
+            if (assets[i].assetType != AssetType.ETH) lastNonEthIdx = i;
+        }
+
+        uint256 wethRemaining = ethToInvest;
         uint256 erc20Idx = 0;
 
         for (uint256 i = 0; i < assets.length; i++) {
             PortfolioAsset storage asset = assets[i];
-            uint256 amountIn = (i == assets.length - 1)
+            if (asset.assetType == AssetType.ETH) continue; // stays in reserve
+
+            uint256 amountIn = (i == lastNonEthIdx)
                 ? wethRemaining
                 : (ethToSwap * asset.weightBps) / 10_000;
             wethRemaining -= amountIn;
@@ -120,8 +138,6 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
                 emit PortfolioAaveDeployed(id, amountIn);
             } else if (asset.assetType == AssetType.SMF) {
                 // Unwrap WETH → ETH then buy SMF via the bonding curve.
-                // smfMinAmount (keeper-supplied) is the minimum tokens expected;
-                // buySMF reverts internally if msg.value < cost for that amount.
                 weth.withdraw(amountIn);
                 uint256 smfBefore = ISMFToken(smfContract).balanceOf(address(this));
                 ISMFToken(smfContract).buySMF{value: amountIn}(smfMinAmount);

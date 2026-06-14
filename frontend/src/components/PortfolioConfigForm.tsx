@@ -6,12 +6,13 @@ interface Props {
   tokenId: number
 }
 
-// AssetType enum: 0=ERC20, 1=AAVE, 2=LP, 3=SMF
+// AssetType enum: 0=ERC20, 1=AAVE, 2=LP, 3=SMF, 4=STAKING, 5=ETH
 const ASSET_TYPES = [
   { value: 0, label: 'ERC20' },
   { value: 1, label: 'AAVE' },
   { value: 2, label: 'LP' },
   { value: 3, label: 'SMF' },
+  { value: 5, label: 'ETH (reserve)' },
 ]
 
 const POOL_FEES = [100, 500, 3000, 10000]
@@ -184,8 +185,8 @@ export default function PortfolioConfigForm({ tokenId }: Props) {
               </div>
             </div>
 
-            {/* Token address — not needed for AAVE */}
-            {row.assetType !== 1 && (
+            {/* Token address — not needed for AAVE or ETH */}
+            {row.assetType !== 1 && row.assetType !== 5 && (
               <div className="space-y-1">
                 <label className="stat-label">
                   {row.assetType === 3 ? 'SMF contract' :

@@ -274,7 +274,7 @@ contract Smartfolio is
             } else if (t == AssetType.STAKING) {
                 revert StakingNotSupported();
             }
-            // AAVE: no additional fields to validate here (pool set globally via setDefaultAavePool)
+            // AAVE, ETH: no additional fields to validate (AAVE pool set globally; ETH stays in reserve)
         }
         if (totalWeight != 10_000) revert WeightsMustSum10000();
 

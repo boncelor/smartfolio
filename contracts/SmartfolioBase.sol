@@ -102,7 +102,7 @@ abstract contract SmartfolioBase {
     // Types
     // -------------------------------------------------------------------------
 
-    enum AssetType { ERC20, AAVE, LP, SMF, STAKING }
+    enum AssetType { ERC20, AAVE, LP, SMF, STAKING, ETH }
 
     struct TierConfig {
         uint128 threshold;

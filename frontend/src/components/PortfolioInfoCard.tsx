@@ -9,7 +9,7 @@ interface Props {
   tokenId: number
 }
 
-const ASSET_TYPE_LABELS = ['ERC20', 'AAVE', 'LP', 'SMF', 'STAKING']
+const ASSET_TYPE_LABELS = ['ERC20', 'AAVE', 'LP', 'SMF', 'STAKING', 'ETH']
 const TIER_LABELS = ['Base (≥20% SMF)', 'LP (≥40% SMF)', 'Leverage (≥60% SMF)']
 
 // Sepolia WETH
@@ -383,6 +383,8 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
             {config.map((asset, i) => {
               const holding = asset.assetType === 0
                 ? erc20Holdings[asset.token.toLowerCase()]
+                : asset.assetType === 5
+                ? reserve  // ETH slice lives in reserve
                 : undefined
               return (
                 <div
@@ -412,6 +414,8 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
                           ? 'WETH (Aave)'
                           : asset.assetType === 3
                           ? 'SMF'
+                          : asset.assetType === 5
+                          ? 'ETH'
                           : asset.token}
                       </span>
                     </div>
@@ -421,7 +425,10 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
                   </div>
                   {holding !== undefined && holding > 0n && (
                     <div className="mt-1 text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
-                      Balance: <span style={{ color: 'rgba(255,255,255,0.65)' }}>{formatEther(holding)}</span>
+                      {asset.assetType === 5 ? 'Reserve: ' : 'Balance: '}
+                      <span style={{ color: 'rgba(255,255,255,0.65)' }}>
+                        {formatEther(holding)}{asset.assetType === 5 ? ' ETH' : ''}
+                      </span>
                     </div>
                   )}
                 </div>
