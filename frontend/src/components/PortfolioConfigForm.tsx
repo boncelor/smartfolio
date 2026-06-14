@@ -16,9 +16,20 @@ const ASSET_TYPES = [
 
 const POOL_FEES = [100, 500, 3000, 10000]
 
+// Sepolia token addresses
+const ERC20_TOKENS = [
+  { label: 'WBTC',  address: '0x29f2D40B0605204364af54EC677bD022dA425d03' },
+  { label: 'LINK',  address: '0x779877A7B0D9E8603169DdbD7836e478b4624789' },
+  { label: 'AAVE',  address: '0x88541670E55cC00bEEFD87eB59EDd1b7C511AC9A' },
+  { label: 'USDC',  address: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238' },
+  { label: 'USDT',  address: '0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0' },
+  { label: 'DAI',   address: '0xFF34B3d4Aee8ddCd6F9AFFFB6Fe49bD371b8a357' },
+]
+
 interface AssetRow {
   assetType: number
   token: string
+  useCustomToken: boolean
   weightBps: string
   poolFee: string
   swapFee: string
@@ -27,7 +38,7 @@ interface AssetRow {
 }
 
 function emptyRow(): AssetRow {
-  return { assetType: 3, token: '', weightBps: '', poolFee: '3000', swapFee: '3000', tickLower: '-887220', tickUpper: '887220' }
+  return { assetType: 3, token: '', useCustomToken: false, weightBps: '', poolFee: '3000', swapFee: '3000', tickLower: '-887220', tickUpper: '887220' }
 }
 
 export default function PortfolioConfigForm({ tokenId }: Props) {
@@ -62,13 +73,23 @@ export default function PortfolioConfigForm({ tokenId }: Props) {
   const totalWeight = rows.reduce((sum, r) => sum + (parseInt(r.weightBps) || 0), 0)
   const weightOk = totalWeight === 10000
 
+  const smfWeightBps = rows
+    .filter(r => r.assetType === 3)
+    .reduce((sum, r) => sum + (parseInt(r.weightBps) || 0), 0)
+  const hasLP    = rows.some(r => r.assetType === 2)
+  const hasAAVE  = rows.some(r => r.assetType === 1)
+  const smfOk    = smfWeightBps >= 2000
+  const lpTierOk = !hasLP   || smfWeightBps >= 4000
+  const lvTierOk = !hasAAVE || smfWeightBps >= 6000
+
   function updateRow(i: number, field: keyof AssetRow, value: string | number) {
     setRows(prev => {
       const next = [...prev]
       next[i] = { ...next[i], [field]: value }
-      // Auto-fill SMF token address
-      if (field === 'assetType' && value === 3 && smfAddr) {
-        next[i].token = smfAddr as string
+      // Auto-fill SMF token address; reset token/custom on type change
+      if (field === 'assetType') {
+        next[i].token = value === 3 && smfAddr ? (smfAddr as string) : ''
+        next[i].useCustomToken = false
       }
       return next
     })
@@ -167,16 +188,55 @@ export default function PortfolioConfigForm({ tokenId }: Props) {
             {row.assetType !== 1 && (
               <div className="space-y-1">
                 <label className="stat-label">
-                  {row.assetType === 3 ? 'SMF contract address' :
-                   row.assetType === 2 ? 'Token B address' : 'Token address'}
+                  {row.assetType === 3 ? 'SMF contract' :
+                   row.assetType === 2 ? 'Token B' : 'Token'}
                 </label>
-                <input
-                  type="text"
-                  value={row.token}
-                  onChange={e => updateRow(i, 'token', e.target.value)}
-                  placeholder="0x…"
-                  className="input-money font-mono text-xs"
-                />
+                {(row.assetType === 0 || row.assetType === 2) && !row.useCustomToken ? (
+                  <select
+                    value={row.token}
+                    onChange={e => {
+                      if (e.target.value === '__custom__') {
+                        setRows(prev => { const n = [...prev]; n[i] = { ...n[i], useCustomToken: true, token: '' }; return n })
+                      } else {
+                        updateRow(i, 'token', e.target.value)
+                      }
+                    }}
+                    className="select-money"
+                  >
+                    <option value="">Select token…</option>
+                    {smfAddr && <option value={smfAddr as string}>SMF</option>}
+                    {ERC20_TOKENS.map(t => (
+                      <option key={t.address} value={t.address}>{t.label}</option>
+                    ))}
+                    <option value="__custom__">Custom address…</option>
+                  </select>
+                ) : (row.assetType === 0 || row.assetType === 2) && row.useCustomToken ? (
+                  <div className="space-y-1">
+                    <input
+                      type="text"
+                      value={row.token}
+                      onChange={e => updateRow(i, 'token', e.target.value)}
+                      placeholder="0x…"
+                      className="input-money font-mono text-xs"
+                      autoFocus
+                    />
+                    <button
+                      onClick={() => setRows(prev => { const n = [...prev]; n[i] = { ...n[i], useCustomToken: false, token: '' }; return n })}
+                      className="text-xs"
+                      style={{ color: 'rgba(212,175,55,0.5)' }}
+                    >
+                      ← Back to presets
+                    </button>
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={row.token}
+                    onChange={e => updateRow(i, 'token', e.target.value)}
+                    placeholder="0x…"
+                    className="input-money font-mono text-xs"
+                  />
+                )}
                 {row.assetType === 3 && smfAddr && (
                   <button
                     onClick={() => updateRow(i, 'token', smfAddr as string)}
@@ -268,9 +328,26 @@ export default function PortfolioConfigForm({ tokenId }: Props) {
         </span>
       </div>
 
+      {/* SMF requirement warnings */}
+      {!smfOk && (
+        <div className="box-warning text-sm">
+          Portfolio must include at least <strong>20% SMF</strong> (Base tier). Add an SMF slot.
+        </div>
+      )}
+      {!lpTierOk && (
+        <div className="box-warning text-sm">
+          LP positions require at least <strong>40% SMF</strong> (LP tier). Current SMF: {(smfWeightBps / 100).toFixed(0)}%.
+        </div>
+      )}
+      {!lvTierOk && (
+        <div className="box-warning text-sm">
+          AAVE positions require at least <strong>60% SMF</strong> (Leverage tier). Current SMF: {(smfWeightBps / 100).toFixed(0)}%.
+        </div>
+      )}
+
       <button
         onClick={handleSubmit}
-        disabled={!weightOk || isPending || isConfirming || !!portfolioActive}
+        disabled={!weightOk || !smfOk || !lpTierOk || !lvTierOk || isPending || isConfirming || !!portfolioActive}
         className="btn-gold"
       >
         {isPending ? 'Confirm in wallet…' : isConfirming ? 'Saving…' : 'Set Portfolio Config'}

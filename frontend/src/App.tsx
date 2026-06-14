@@ -7,8 +7,6 @@ import MintNewForm from './components/MintNewForm'
 import InfoCard from './components/InfoCard'
 import ExitForm from './components/ExitForm'
 import PortfolioInfoCard from './components/PortfolioInfoCard'
-import PortfolioKeeperPanel from './components/PortfolioKeeperPanel'
-import PortfolioConfigForm from './components/PortfolioConfigForm'
 import PaperView from './components/PaperView'
 
 type Tab = 'smf' | 'nft' | 'paper'
@@ -134,8 +132,6 @@ export default function App() {
                   <InfoCard tokenId={tokenId} />
                   <ExitForm tokenId={tokenId} />
                   <PortfolioInfoCard tokenId={tokenId} />
-                  <PortfolioKeeperPanel tokenId={tokenId} />
-                  <PortfolioConfigForm tokenId={tokenId} />
                 </>
               )}
             </div>
