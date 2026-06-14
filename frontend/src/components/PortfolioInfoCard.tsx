@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAccount, usePublicClient } from 'wagmi'
-import { formatEther } from 'viem'
-import { CONTRACT_ADDRESS, SMARTFOLIO_ABI } from '../contracts'
+import { formatEther, parseEther } from 'viem'
+import { CONTRACT_ADDRESS, SMARTFOLIO_ABI, SMF_ADDRESS, SMF_ABI } from '../contracts'
 import PortfolioConfigForm from './PortfolioConfigForm'
 import { buildRebalanceInstructions, type RebalancePreview } from '../utils/rebalanceInstructions'
 
@@ -15,12 +15,18 @@ const TIER_LABELS = ['Base (≥20% SMF)', 'LP (≥40% SMF)', 'Leverage (≥60% S
 // Sepolia WETH
 const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14'
 
-type Mode = 'view' | 'config' | 'rebalance'
+type Mode = 'view' | 'config' | 'rebalance' | 'topup'
+type TopUpTab = 'smf' | 'eth'
 
 export default function PortfolioInfoCard({ tokenId }: Props) {
   const [mode, setMode] = useState<Mode>('view')
   const [preview, setPreview] = useState<RebalancePreview | null>(null)
   const [quoting, setQuoting] = useState(false)
+  const [topUpTab, setTopUpTab] = useState<TopUpTab>('smf')
+  const [smfInput, setSmfInput] = useState('')
+  const [ethInput, setEthInput] = useState('')
+  const [smfCostEstimate, setSmfCostEstimate] = useState<bigint | null>(null)
+  const [estimating, setEstimating] = useState(false)
 
   const { address, isConnected } = useAccount()
   const publicClient = usePublicClient()
@@ -35,6 +41,7 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
       { address: CONTRACT_ADDRESS, abi: SMARTFOLIO_ABI, functionName: 'portfolioSMFHoldings', args: [id] },
       { address: CONTRACT_ADDRESS, abi: SMARTFOLIO_ABI, functionName: 'portfolioAaveWeth',    args: [id] },
       { address: CONTRACT_ADDRESS, abi: SMARTFOLIO_ABI, functionName: 'balanceOf',            args: [address ?? '0x0000000000000000000000000000000000000000', id] },
+      { address: SMF_ADDRESS,      abi: SMF_ABI,        functionName: 'balanceOf',            args: [address ?? '0x0000000000000000000000000000000000000000'] },
     ],
     query: { enabled: tokenId > 0 },
   })
@@ -46,6 +53,7 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
   const smfHoldings  = data?.[4]?.status === 'success' ? (data[4].result as bigint) : undefined
   const aaveWeth     = data?.[5]?.status === 'success' ? (data[5].result as bigint) : undefined
   const holderBalance = data?.[6]?.status === 'success' ? (data[6].result as bigint) : undefined
+  const userSmfBalance = data?.[7]?.status === 'success' ? (data[7].result as bigint) : undefined
 
   const smfWeightBps = tierInfo?.[0]
   const tier         = tierInfo?.[1]
@@ -108,6 +116,12 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
   // Deploy reserve write
   const { writeContract: writeDeploy, data: deployHash, isPending: deployPending, error: deployError, reset: resetDeploy } = useWriteContract()
   const { isLoading: deployConfirming, isSuccess: deployConfirmed } = useWaitForTransactionReceipt({ hash: deployHash })
+
+  // Top-up writes
+  const { writeContract: writeAddSMF, data: addSMFHash, isPending: addSMFPending, error: addSMFError, reset: resetAddSMF } = useWriteContract()
+  const { isLoading: addSMFConfirming, isSuccess: addSMFConfirmed } = useWaitForTransactionReceipt({ hash: addSMFHash })
+  const { writeContract: writeAddETH, data: addETHHash, isPending: addETHPending, error: addETHError, reset: resetAddETH } = useWriteContract()
+  const { isLoading: addETHConfirming, isSuccess: addETHConfirmed } = useWaitForTransactionReceipt({ hash: addETHHash })
 
   if (tokenId === 0) return null
 
@@ -263,12 +277,169 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
     )
   }
 
+  // --- Top-up mode ---
+  if (mode === 'topup') {
+    async function handleEstimate() {
+      if (!ethInput || !publicClient) return
+      setEstimating(true)
+      setSmfCostEstimate(null)
+      try {
+        const ethWei = parseEther(ethInput)
+        const cost = await publicClient.readContract({
+          address: SMF_ADDRESS,
+          abi: SMF_ABI,
+          functionName: 'smfForReserve',
+          args: [ethWei],
+        }) as bigint
+        setSmfCostEstimate(cost)
+      } catch {
+        setSmfCostEstimate(null)
+      }
+      setEstimating(false)
+    }
+
+    function handleAddSMF() {
+      if (!smfInput) return
+      resetAddSMF()
+      writeAddSMF({
+        address: SMF_ADDRESS,
+        abi: SMF_ABI,
+        functionName: 'addSMFToNFT',
+        args: [id, BigInt(smfInput)],
+      })
+    }
+
+    function handleAddETH() {
+      if (!ethInput || !smfCostEstimate) return
+      resetAddETH()
+      const slippage = (smfCostEstimate * 101n) / 100n // 1% slippage on SMF cost
+      writeAddETH({
+        address: SMF_ADDRESS,
+        abi: SMF_ABI,
+        functionName: 'addETHToNFT',
+        args: [id, parseEther(ethInput), slippage],
+      })
+    }
+
+    return (
+      <div className="card space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-bold text-white">Top Up Portfolio</h2>
+          <button
+            onClick={() => { setMode('view'); setSmfInput(''); setEthInput(''); setSmfCostEstimate(null) }}
+            className="p-1.5 rounded"
+            style={{ color: 'rgba(212,175,55,0.5)' }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* Tab switcher */}
+        <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid rgba(212,175,55,0.2)' }}>
+          {(['smf', 'eth'] as TopUpTab[]).map(tab => (
+            <button
+              key={tab}
+              onClick={() => { setTopUpTab(tab); setSmfCostEstimate(null) }}
+              className="flex-1 py-1.5 text-sm font-semibold transition-colors"
+              style={{
+                background: topUpTab === tab ? 'rgba(212,175,55,0.15)' : 'transparent',
+                color: topUpTab === tab ? '#d4af37' : 'rgba(255,255,255,0.35)',
+              }}
+            >
+              {tab === 'smf' ? 'Add SMF' : 'Add ETH to Reserve'}
+            </button>
+          ))}
+        </div>
+
+        {userSmfBalance !== undefined && (
+          <p className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
+            Your SMF balance: <span style={{ color: 'rgba(255,255,255,0.65)' }}>{userSmfBalance.toString()} SMF</span>
+          </p>
+        )}
+
+        {topUpTab === 'smf' && (
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label className="stat-label">SMF amount</label>
+              <input
+                type="number" min={1}
+                value={smfInput}
+                onChange={e => setSmfInput(e.target.value)}
+                placeholder="e.g. 100"
+                className="input-money"
+              />
+            </div>
+            <button
+              onClick={handleAddSMF}
+              disabled={!smfInput || addSMFPending || addSMFConfirming}
+              className="btn-gold w-full"
+            >
+              {addSMFPending ? 'Confirm…' : addSMFConfirming ? 'Adding…' : 'Add SMF to Portfolio'}
+            </button>
+            {addSMFConfirmed && <p className="text-sm font-semibold" style={{ color: '#34d399' }}>SMF added.</p>}
+            {addSMFError && <p className="text-sm break-all" style={{ color: '#f87171' }}>Error: {addSMFError.message}</p>}
+          </div>
+        )}
+
+        {topUpTab === 'eth' && (
+          <div className="space-y-3">
+            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
+              Burns SMF from your wallet → adds ETH to this NFT's reserve.
+            </p>
+            <div className="space-y-1">
+              <label className="stat-label">ETH amount to add</label>
+              <div className="flex gap-2">
+                <input
+                  type="number" min={0} step="0.001"
+                  value={ethInput}
+                  onChange={e => { setEthInput(e.target.value); setSmfCostEstimate(null) }}
+                  placeholder="e.g. 0.01"
+                  className="input-money flex-1"
+                />
+                <button onClick={handleEstimate} disabled={!ethInput || estimating} className="btn-outline-gold px-3 text-xs">
+                  {estimating ? '…' : 'Estimate'}
+                </button>
+              </div>
+            </div>
+            {smfCostEstimate !== null && (
+              <div className="rounded px-2.5 py-2 text-sm" style={{ background: 'rgba(5,25,14,0.7)', border: '1px solid rgba(212,175,55,0.15)' }}>
+                SMF to burn: <span className="font-bold" style={{ color: '#d4af37' }}>{smfCostEstimate.toString()} SMF</span>
+                <span className="ml-2 text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>(+1% slippage guard)</span>
+              </div>
+            )}
+            <button
+              onClick={handleAddETH}
+              disabled={!ethInput || !smfCostEstimate || addETHPending || addETHConfirming}
+              className="btn-gold w-full"
+            >
+              {addETHPending ? 'Confirm…' : addETHConfirming ? 'Adding…' : 'Add ETH to Reserve'}
+            </button>
+            {addETHConfirmed && <p className="text-sm font-semibold" style={{ color: '#34d399' }}>ETH added to reserve.</p>}
+            {addETHError && <p className="text-sm break-all" style={{ color: '#f87171' }}>Error: {addETHError.message}</p>}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   // --- Normal view ---
   return (
     <div className="card space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-bold text-white">Portfolio</h2>
         <div className="flex items-center gap-1">
+          {isHolder && (
+            <button
+              onClick={() => setMode('topup')}
+              title="Top up — add SMF or ETH to reserve"
+              className="p-1.5 rounded transition-colors text-xs font-semibold"
+              style={{ color: 'rgba(212,175,55,0.6)' }}
+            >
+              +
+            </button>
+          )}
           {needsRebalance && (
             <button
               onClick={() => { setMode('rebalance'); setPreview(null) }}
