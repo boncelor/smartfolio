@@ -138,7 +138,9 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
                 emit PortfolioAaveDeployed(id, amountIn);
             } else if (asset.assetType == AssetType.SMF) {
                 // Unwrap WETH → ETH then buy SMF via the bonding curve.
+                // smfMinAmount = exact token count to buy (caller computes this off-chain).
                 weth.withdraw(amountIn);
+                if (smfMinAmount == 0) revert AmountZero();
                 uint256 smfBefore = ISMFToken(smfContract).balanceOf(address(this));
                 ISMFToken(smfContract).buySMF{value: amountIn}(smfMinAmount);
                 uint256 smfReceived = ISMFToken(smfContract).balanceOf(address(this)) - smfBefore;

@@ -58,6 +58,20 @@ export const SMF_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
   {
+    name: 'getTiers',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{
+      name: '',
+      type: 'tuple[]',
+      components: [
+        { name: 'threshold', type: 'uint128' },
+        { name: 'pricePerToken', type: 'uint128' },
+      ],
+    }],
+  },
+  {
     name: 'balanceOf',
     type: 'function',
     stateMutability: 'view',
