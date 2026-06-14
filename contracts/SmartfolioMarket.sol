@@ -79,7 +79,6 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
 
         PortfolioAsset[] storage assets = _getPortfolioConfig(id);
         if (assets.length == 0) revert NoPortfolioConfig();
-        if (portfolioActive[id]) revert AlreadyDeployed();
         if (reserve[id] == 0) revert NoReserveToDeploy();
 
         // Count ERC20 assets for minAmounts array length check
@@ -210,7 +209,6 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
     }
 
     function rebalance(uint256 id, RebalanceInstruction[] calldata instructions) external {
-        if (!portfolioActive[id]) revert PortfolioNotActive();
         if (instructions.length == 0) revert NoInstructions();
 
         for (uint256 i = 0; i < instructions.length; i++) {
@@ -232,7 +230,6 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
     }
 
     function divest(uint256 id, uint256 amount) external {
-        if (!portfolioActive[id]) revert PortfolioNotActive();
         if (amount == 0) revert AmountZero();
         if (balanceOf(msg.sender, id) < amount) revert InsufficientBalance();
 

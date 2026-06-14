@@ -17,8 +17,6 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
 
   const { data } = useReadContracts({
     contracts: [
-      { address: CONTRACT_ADDRESS, abi: SMARTFOLIO_ABI, functionName: 'portfolioActive',      args: [id] },
-      { address: CONTRACT_ADDRESS, abi: SMARTFOLIO_ABI, functionName: 'deployedEth',          args: [id] },
       { address: CONTRACT_ADDRESS, abi: SMARTFOLIO_ABI, functionName: 'reserve',              args: [id] },
       { address: CONTRACT_ADDRESS, abi: SMARTFOLIO_ABI, functionName: 'totalSupply',          args: [id] },
       { address: CONTRACT_ADDRESS, abi: SMARTFOLIO_ABI, functionName: 'getPortfolioConfig',   args: [id] },
@@ -29,14 +27,12 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
     query: { enabled: tokenId > 0 },
   })
 
-  const active         = data?.[0]?.status === 'success' ? (data[0].result as boolean) : undefined
-  const deployedEth    = data?.[1]?.status === 'success' ? (data[1].result as bigint) : undefined
-  const reserve        = data?.[2]?.status === 'success' ? (data[2].result as bigint) : undefined
-  const totalSupply    = data?.[3]?.status === 'success' ? (data[3].result as bigint) : undefined
-  const config         = data?.[4]?.status === 'success' ? (data[4].result as readonly { assetType: number; token: string; weightBps: number }[]) : undefined
-  const tierInfo       = data?.[5]?.status === 'success' ? (data[5].result as readonly [bigint, number]) : undefined
-  const smfHoldings    = data?.[6]?.status === 'success' ? (data[6].result as bigint) : undefined
-  const aaveWeth       = data?.[7]?.status === 'success' ? (data[7].result as bigint) : undefined
+  const reserve        = data?.[0]?.status === 'success' ? (data[0].result as bigint) : undefined
+  const totalSupply    = data?.[1]?.status === 'success' ? (data[1].result as bigint) : undefined
+  const config         = data?.[2]?.status === 'success' ? (data[2].result as readonly { assetType: number; token: string; weightBps: number }[]) : undefined
+  const tierInfo       = data?.[3]?.status === 'success' ? (data[3].result as readonly [bigint, number]) : undefined
+  const smfHoldings    = data?.[4]?.status === 'success' ? (data[4].result as bigint) : undefined
+  const aaveWeth       = data?.[5]?.status === 'success' ? (data[5].result as bigint) : undefined
 
   const smfWeightBps = tierInfo?.[0]
   const tier         = tierInfo?.[1]
@@ -65,45 +61,25 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
     <div className="card space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-bold text-white">Portfolio</h2>
-        <div className="flex items-center gap-2">
-          {active !== undefined && (
-            <span
-              className="text-xs font-bold px-2 py-0.5 rounded-full"
-              style={
-                active
-                  ? { background: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.3)' }
-                  : { background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.1)' }
-              }
-            >
-              {active ? 'Deployed' : 'Not Deployed'}
-            </span>
-          )}
-          <button
-            onClick={() => setConfiguring(true)}
-            title="Configure portfolio"
-            className="p-1.5 rounded transition-colors"
-            style={{ color: 'rgba(212,175,55,0.4)' }}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
-          </button>
-        </div>
+        <button
+          onClick={() => setConfiguring(true)}
+          title="Configure portfolio"
+          className="p-1.5 rounded transition-colors"
+          style={{ color: 'rgba(212,175,55,0.4)' }}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
       </div>
 
       {/* Key stats */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         <div>
           <p className="stat-label">Reserve</p>
           <p className="text-sm font-semibold text-white">
             {reserve !== undefined ? `${formatEther(reserve)} ETH` : '—'}
-          </p>
-        </div>
-        <div>
-          <p className="stat-label">Deployed ETH</p>
-          <p className="text-sm font-semibold text-white">
-            {deployedEth !== undefined ? `${formatEther(deployedEth)} ETH` : '—'}
           </p>
         </div>
         <div>
@@ -132,7 +108,7 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
         </div>
       )}
 
-      {/* SMF holdings — shown pre- and post-deployment */}
+      {/* SMF holdings */}
       {smfHoldings !== undefined && smfHoldings > 0n && (
         <div className="space-y-1.5">
           <p className="stat-label">SMF in Portfolio</p>
@@ -140,16 +116,13 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
             className="rounded px-2.5 py-1.5 flex items-center justify-between text-sm"
             style={{ background: 'rgba(5,25,14,0.7)', border: '1px solid rgba(212,175,55,0.12)' }}
           >
-            <span style={{ color: 'rgba(212,175,55,0.6)', fontSize: '0.75rem' }}>
-              {active ? 'Deployed' : 'Pending deployment'}
-            </span>
             <span className="font-semibold text-white">{smfHoldings.toString()} SMF</span>
           </div>
         </div>
       )}
 
-      {/* Active holdings (AAVE etc.) */}
-      {active && aaveWeth !== undefined && aaveWeth > 0n && (
+      {/* Holdings */}
+      {aaveWeth !== undefined && aaveWeth > 0n && (
         <div className="space-y-1.5">
           <p className="stat-label">Holdings</p>
           <div className="grid grid-cols-2 gap-2 text-sm">

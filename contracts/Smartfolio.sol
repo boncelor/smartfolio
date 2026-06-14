@@ -247,7 +247,6 @@ contract Smartfolio is
     function setPortfolioConfig(uint256 id, PortfolioAsset[] calldata assets) external onlyOwner {
         if (assets.length == 0) revert NoAssetsProvided();
         if (assets.length > 10) revert AssetLimitExceeded();
-        if (portfolioActive[id]) revert PortfolioActive();
         uint256 totalWeight;
         uint256 smfCount;
         for (uint256 i = 0; i < assets.length; i++) {

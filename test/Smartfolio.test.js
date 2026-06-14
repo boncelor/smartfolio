@@ -937,16 +937,6 @@ contract("Smartfolio", (accounts) => {
         await expectRevert(sf.rebalance(TOKEN_ID, instructions, { from: keeper }), "insufficient holdings");
       });
 
-      it("reverts if portfolio is not active", async () => {
-        const OTHER_ID = 44;
-        await sf.setTiers(TIERS, { from: owner });
-        await sf.setPortfolioConfig(OTHER_ID, buildAssets(tokenA.address, tokenB.address, mockSMF.address), { from: owner });
-        const instructions = [
-          { token: tokenA.address, isSell: true, amountIn: 1, amountOutMin: 0, poolFee: 3000, swapPath: "0x", sellSwapPath: "0x" },
-        ];
-        await expectRevert(sf.rebalance(OTHER_ID, instructions, { from: keeper }), "portfolio not active");
-      });
-
       it("reverts with empty instructions", async () => {
         await expectRevert(sf.rebalance(TOKEN_ID, [], { from: keeper }), "no instructions");
       });
@@ -1080,22 +1070,15 @@ contract("Smartfolio", (accounts) => {
         );
       });
 
-      it("after full divest owner can reconfigure and redeploy", async () => {
-        await sf.divest(TOKEN_ID, 100, { from: alice });
-
-        // Can set new config now that portfolio is inactive
+      it("owner can reconfigure while portfolio is active", async () => {
+        // setPortfolioConfig is no longer gated on portfolioActive
         await sf.setPortfolioConfig(
           TOKEN_ID,
           buildAssets(tokenA.address, tokenB.address, mockSMF.address),
           { from: owner }
         );
-
-        // Bob mints and redeploys
-        const cost = await sf.mintCost(10);
-        await mockSMF.mintFundedOnBehalf(sf.address, bob, TOKEN_ID, 10, { from: owner, value: cost });
-        await sf.deploy(TOKEN_ID, [0, 0], 0, 0, 0, 0, { from: keeper });
-
-        assert.equal(await sf.portfolioActive(TOKEN_ID), true);
+        const cfg = await sf.getPortfolioConfig(TOKEN_ID);
+        assert.equal(cfg.length, 3);
       });
 
       it("multiple holders divesting proportionally does not affect each other", async () => {
@@ -1140,8 +1123,7 @@ contract("Smartfolio", (accounts) => {
 
 
 
-      it("reverts if portfolio is not active", async () => {
-        // Deploy a fresh token ID that has never been deployed
+      it("divest works on a portfolio that has never been deployed (returns ETH from reserve)", async () => {
         const OTHER_ID = 50;
         await sf.setTiers(TIERS, { from: owner });
         await sf.setPortfolioConfig(
@@ -1151,10 +1133,9 @@ contract("Smartfolio", (accounts) => {
         );
         const cost = await sf.mintCost(1);
         await mockSMF.mintFundedOnBehalf(sf.address, alice, OTHER_ID, 1, { from: owner, value: cost });
-        await expectRevert(
-          sf.divest(OTHER_ID, 1, { from: alice }),
-          "portfolio not active"
-        );
+        // Should succeed — returns ETH from reserve, no holdings to transfer
+        await sf.divest(OTHER_ID, 1, { from: alice });
+        assert.equal((await sf.totalSupply(OTHER_ID)).toString(), "0");
       });
 
       it("reverts if balance is insufficient", async () => {

@@ -224,7 +224,7 @@ Weights across all slice types must sum to exactly 10,000 bps.
 6. User:   divest(id, amount)                                — pro-rata basket → assets in-kind
 ```
 
-After `deploy()`, `portfolioActive[id]` is set to `true` and `reserve[id]` is zeroed. The six-parameter signature separates slippage guards by slice type: `erc20MinAmounts` is an array covering ERC20 slices in order; `smfMinAmount` is the minimum SMF expected from the bonding curve buy; the three LP parameters guard the V3 position mint.
+After `deploy()`, `reserve[id]` is zeroed and `portfolioActive[id]` is set to `true` (informational — not a gate). The six-parameter signature separates slippage guards by slice type: `erc20MinAmounts` is an array covering ERC20 slices in order; `smfMinAmount` is the minimum SMF expected from the bonding curve buy; the three LP parameters guard the V3 position mint.
 
 ### 4.5 Deploying
 
@@ -237,7 +237,7 @@ The keeper calls `deploy(id, erc20MinAmounts, smfMinAmount, lpSwapAmountOutMin, 
    - **AAVE**: deposits allocated WETH into Aave V3 via the shared proxy account (`defaultAavePool`). `portfolioAaveWeth[id]` records the deposited amount for per-ID accounting.
    - **SMF**: unwraps WETH to ETH, then calls `buySMF{value: amountIn}(smfMinAmount)` on the SMF contract. The acquired SMF is held by the proxy and tracked in `portfolioSMFHoldings[id]`.
    - **LP**: swaps half the allocated WETH to `token` via the swap router (`lpSwapAmountOutMin`), then mints a Uniswap V3 position (`lpAmount0Min`, `lpAmount1Min`). The position NFT is held by the proxy. Any token amounts unused by the position manager (current price ratio mismatch) are unwrapped back to ETH and added to `reserve[id]` as leftover.
-4. `portfolioActive[id]` is set to `true`.
+4. `portfolioActive[id]` is set to `true` (informational).
 
 ### 4.6 LP Slice Operations
 
@@ -288,7 +288,7 @@ A holder calls `divest(id, amount)`. Assets are returned in-kind — no swaps oc
 - **LP**: removes `lpLiquidity × amount / supply` liquidity from the V3 position. Collected WETH is unwrapped to ETH and sent to the caller; collected tokenB is transferred directly.
 - **Reserve**: any proportional share of `reserve[id]` (undeployed leftover or fee income) is sent as ETH.
 
-No swaps, no bonding curve interaction, no fee. The holder receives their pro-rata slice of every asset exactly as held. When all tokens have been divested, `portfolioActive[id]` resets and the owner may reconfigure the basket.
+No swaps, no bonding curve interaction, no fee. The holder receives their pro-rata slice of every asset exactly as held. `divest()` works at any time regardless of whether `deploy()` has been called — if no assets have been deployed, the reserve ETH is returned. The owner may reconfigure the basket via `setPortfolioConfig()` at any time.
 
 ### 4.10 Rebalancing
 
@@ -446,7 +446,7 @@ net        = gross − fee
 | Upgrade safety | UUPS — only `_authorizeUpgrade` (owner) can approve implementation upgrades |
 | Storage safety | All state in `SmartfolioBase`; OpenZeppelin state uses EIP-7201 namespaced slots, no collision possible |
 | Slippage | `minEthOut` / `amountsOutMinimum` on all Uniswap interactions; `smfMinAmount` on bonding curve buys |
-| Instrument exclusion | Once `setPortfolioConfig` is called for a token ID, the token is a Portfolio instrument. `portfolioActive[id]` is set on deploy and cleared only when all holders have exited. A token cannot transition between Standard and Portfolio |
+| Instrument exclusion | Once `setPortfolioConfig` is called for a token ID, the token is a Portfolio instrument. A token cannot transition between Standard and Portfolio |
 | Shared Aave account | All AAVE slices across all portfolio IDs share one proxy-level Aave account. Phase 1 (collateral-only) positions hold no debt and cannot be liquidated. Phase 2 borrowing (planned) will require careful aggregate health factor management across all portfolios on the proxy |
 | SMF entry point | `mintFundedNew` and `addReserve` on Smartfolio are restricted to the registered SMF contract via `CallerNotSMFContract`. No external party can inject ETH into a reserve or mint tokens at arbitrary prices |
 
@@ -454,7 +454,7 @@ net        = gross − fee
 
 ## 7. Instrument Types
 
-Smartfolio issues two instrument types. Each token ID is bound to exactly one type, determined by whether `setPortfolioConfig` has been called. Once a portfolio is configured and deployed, `portfolioActive[id]` is set and the token cannot be reconfigured until all holders have divested.
+Smartfolio issues two instrument types. Each token ID is bound to exactly one type, determined by whether `setPortfolioConfig` has been called. The portfolio config can be updated at any time — the owner calls `setPortfolioConfig()` to change the allocation, and the keeper calls `deploy()` to invest any undeployed `reserve[id]` ETH into the new config.
 
 | Type | Reserve | Entry | Exit | Fee |
 |---|---|---|---|---|
