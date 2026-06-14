@@ -89,6 +89,18 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
   const hasReserve   = reserve !== undefined && reserve > 0n
   const hasErc20     = config !== undefined && config.some(a => a.assetType === 0)
 
+  // Rebalance is needed when:
+  // - at least one configured ERC20 has non-zero holdings (portfolio has been deployed)
+  // - AND at least one configured ERC20 has zero holdings (config has diverged from state)
+  // This catches: new asset added to config, or asset removed/replaced.
+  const erc20HasAnyHoldings = erc20Assets.some(
+    a => (erc20Holdings[a.token.toLowerCase()] ?? 0n) > 0n
+  )
+  const erc20HasAnyZeroHoldings = erc20Assets.some(
+    a => (erc20Holdings[a.token.toLowerCase()] ?? 0n) === 0n
+  )
+  const needsRebalance = isHolder && hasErc20 && erc20HasAnyHoldings && erc20HasAnyZeroHoldings
+
   // Rebalance write
   const { writeContract: writeRebalance, data: rebalanceHash, isPending: rebalancePending, error: rebalanceError, reset: resetRebalance } = useWriteContract()
   const { isLoading: rebalanceConfirming, isSuccess: rebalanceConfirmed } = useWaitForTransactionReceipt({ hash: rebalanceHash })
@@ -257,14 +269,14 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
       <div className="flex items-center justify-between">
         <h2 className="text-base font-bold text-white">Portfolio</h2>
         <div className="flex items-center gap-1">
-          {isHolder && hasErc20 && (
+          {needsRebalance && (
             <button
               onClick={() => { setMode('rebalance'); setPreview(null) }}
-              title="Rebalance ERC20 holdings"
+              title="Portfolio out of sync with config — rebalance needed"
               className="p-1.5 rounded transition-colors text-xs font-semibold"
-              style={{ color: 'rgba(52,211,153,0.7)' }}
+              style={{ color: '#f59e0b' }}
             >
-              ⇄
+              ⚠ Rebalance
             </button>
           )}
           <button
@@ -390,7 +402,12 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
                 <div
                   key={i}
                   className="rounded px-2.5 py-1.5 text-sm"
-                  style={{ background: 'rgba(5,25,14,0.5)', border: '1px solid rgba(212,175,55,0.08)' }}
+                  style={{
+                    background: 'rgba(5,25,14,0.5)',
+                    border: needsRebalance && asset.assetType === 0 && (erc20Holdings[asset.token.toLowerCase()] ?? 0n) === 0n
+                      ? '1px solid rgba(245,158,11,0.4)'
+                      : '1px solid rgba(212,175,55,0.08)',
+                  }}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
