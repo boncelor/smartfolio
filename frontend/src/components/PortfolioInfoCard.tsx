@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAccount, usePublicClient } from 'wagmi'
-import { formatEther, parseEther } from 'viem'
+import { formatEther } from 'viem'
 import { CONTRACT_ADDRESS, SMARTFOLIO_ABI, SMF_ADDRESS, SMF_ABI } from '../contracts'
 import PortfolioConfigForm from './PortfolioConfigForm'
 import { buildRebalanceInstructions, type RebalancePreview } from '../utils/rebalanceInstructions'
@@ -16,17 +16,12 @@ const TIER_LABELS = ['Base (≥20% SMF)', 'LP (≥40% SMF)', 'Leverage (≥60% S
 const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14'
 
 type Mode = 'view' | 'config' | 'rebalance' | 'topup'
-type TopUpTab = 'smf' | 'eth'
 
 export default function PortfolioInfoCard({ tokenId }: Props) {
   const [mode, setMode] = useState<Mode>('view')
   const [preview, setPreview] = useState<RebalancePreview | null>(null)
   const [quoting, setQuoting] = useState(false)
-  const [topUpTab, setTopUpTab] = useState<TopUpTab>('smf')
   const [smfInput, setSmfInput] = useState('')
-  const [ethInput, setEthInput] = useState('')
-  const [smfCostEstimate, setSmfCostEstimate] = useState<bigint | null>(null)
-  const [estimating, setEstimating] = useState(false)
 
   const { address, isConnected } = useAccount()
   const publicClient = usePublicClient()
@@ -98,16 +93,17 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
   const hasErc20     = config !== undefined && config.some(a => a.assetType === 0)
 
   // Rebalance is needed when:
-  // - at least one configured ERC20 has non-zero holdings (portfolio has been deployed)
-  // - AND at least one configured ERC20 has zero holdings (config has diverged from state)
-  // This catches: new asset added to config, or asset removed/replaced.
+  // 1. ETH is sitting in reserve and the config has assets to deploy into (deploy needed)
+  // 2. At least one configured ERC20 has holdings while another has zero (ERC20 drift)
   const erc20HasAnyHoldings = erc20Assets.some(
     a => (erc20Holdings[a.token.toLowerCase()] ?? 0n) > 0n
   )
   const erc20HasAnyZeroHoldings = erc20Assets.some(
     a => (erc20Holdings[a.token.toLowerCase()] ?? 0n) === 0n
   )
-  const needsRebalance = isHolder && hasErc20 && erc20HasAnyHoldings && erc20HasAnyZeroHoldings
+  const hasErc20Drift = hasErc20 && erc20HasAnyHoldings && erc20HasAnyZeroHoldings
+  const needsDeploy = isHolder && hasReserve && config !== undefined && config.length > 0
+  const needsRebalance = isHolder && (hasErc20Drift || needsDeploy)
 
   // Rebalance write
   const { writeContract: writeRebalance, data: rebalanceHash, isPending: rebalancePending, error: rebalanceError, reset: resetRebalance } = useWriteContract()
@@ -117,11 +113,9 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
   const { writeContract: writeDeploy, data: deployHash, isPending: deployPending, error: deployError, reset: resetDeploy } = useWriteContract()
   const { isLoading: deployConfirming, isSuccess: deployConfirmed } = useWaitForTransactionReceipt({ hash: deployHash })
 
-  // Top-up writes
+  // Top-up write
   const { writeContract: writeAddSMF, data: addSMFHash, isPending: addSMFPending, error: addSMFError, reset: resetAddSMF } = useWriteContract()
   const { isLoading: addSMFConfirming, isSuccess: addSMFConfirmed } = useWaitForTransactionReceipt({ hash: addSMFHash })
-  const { writeContract: writeAddETH, data: addETHHash, isPending: addETHPending, error: addETHError, reset: resetAddETH } = useWriteContract()
-  const { isLoading: addETHConfirming, isSuccess: addETHConfirmed } = useWaitForTransactionReceipt({ hash: addETHHash })
 
   if (tokenId === 0) return null
 
@@ -203,7 +197,7 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
     return (
       <div className="card space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-bold text-white">Rebalance ERC20s</h2>
+          <h2 className="text-base font-bold text-white">Rebalance</h2>
           <button
             onClick={() => { setMode('view'); setPreview(null) }}
             className="p-1.5 rounded"
@@ -215,15 +209,48 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
           </button>
         </div>
 
-        <p className="text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>
-          Sells all {erc20Count} ERC20 holdings → re-buys proportionally to current config weights.
-          SMF, AAVE, and LP slices are not touched.
-        </p>
+        {/* Deploy reserve section — shown when ETH is waiting in reserve */}
+        {needsDeploy && reserve !== undefined && (
+          <div className="space-y-2 pb-2" style={{ borderBottom: hasErc20Drift ? '1px solid rgba(212,175,55,0.1)' : undefined }}>
+            <p className="stat-label">Deploy Reserve</p>
+            <p className="text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>
+              {formatEther(reserve)} ETH in reserve — deploy into the portfolio basket per config weights.
+            </p>
+            <button
+              onClick={() => {
+                resetDeploy()
+                const erc20Count = config?.filter(a => a.assetType === 0).length ?? 0
+                writeDeploy({
+                  address: CONTRACT_ADDRESS,
+                  abi: SMARTFOLIO_ABI,
+                  functionName: 'deploy',
+                  args: [id, Array(erc20Count).fill(0n), 0n, 0n, 0n, 0n],
+                })
+              }}
+              disabled={deployPending || deployConfirming}
+              className="btn-outline-gold w-full"
+            >
+              {deployPending ? 'Confirm…' : deployConfirming ? 'Deploying…' : 'Deploy Reserve'}
+            </button>
+            {deployConfirmed && <p className="text-sm font-semibold" style={{ color: '#34d399' }}>Reserve deployed.</p>}
+            {deployError && <p className="text-sm break-all" style={{ color: '#f87171' }}>Error: {deployError.message}</p>}
+          </div>
+        )}
 
-        {!preview && (
-          <button onClick={handleQuote} disabled={quoting} className="btn-outline-gold">
-            {quoting ? 'Getting quotes…' : 'Get Quote'}
-          </button>
+        {/* ERC20 rebalance section — shown when ERC20 drift detected */}
+        {hasErc20Drift && (
+          <>
+            <p className="text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>
+              Sells all {erc20Count} ERC20 holdings → re-buys proportionally to current config weights.
+              SMF, AAVE, and LP slices are not touched.
+            </p>
+
+            {!preview && (
+              <button onClick={handleQuote} disabled={quoting} className="btn-outline-gold">
+                {quoting ? 'Getting quotes…' : 'Get Quote'}
+              </button>
+            )}
+          </>
         )}
 
         {preview?.error && (
@@ -279,25 +306,6 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
 
   // --- Top-up mode ---
   if (mode === 'topup') {
-    async function handleEstimate() {
-      if (!ethInput || !publicClient) return
-      setEstimating(true)
-      setSmfCostEstimate(null)
-      try {
-        const ethWei = parseEther(ethInput)
-        const cost = await publicClient.readContract({
-          address: SMF_ADDRESS,
-          abi: SMF_ABI,
-          functionName: 'smfForReserve',
-          args: [ethWei],
-        }) as bigint
-        setSmfCostEstimate(cost)
-      } catch {
-        setSmfCostEstimate(null)
-      }
-      setEstimating(false)
-    }
-
     function handleAddSMF() {
       if (!smfInput) return
       resetAddSMF()
@@ -309,24 +317,12 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
       })
     }
 
-    function handleAddETH() {
-      if (!ethInput || !smfCostEstimate) return
-      resetAddETH()
-      const slippage = (smfCostEstimate * 101n) / 100n // 1% slippage on SMF cost
-      writeAddETH({
-        address: SMF_ADDRESS,
-        abi: SMF_ABI,
-        functionName: 'addETHToNFT',
-        args: [id, parseEther(ethInput), slippage],
-      })
-    }
-
     return (
       <div className="card space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-bold text-white">Top Up Portfolio</h2>
           <button
-            onClick={() => { setMode('view'); setSmfInput(''); setEthInput(''); setSmfCostEstimate(null) }}
+            onClick={() => { setMode('view'); setSmfInput('') }}
             className="p-1.5 rounded"
             style={{ color: 'rgba(212,175,55,0.5)' }}
           >
@@ -336,90 +332,31 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
           </button>
         </div>
 
-        {/* Tab switcher */}
-        <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid rgba(212,175,55,0.2)' }}>
-          {(['smf', 'eth'] as TopUpTab[]).map(tab => (
-            <button
-              key={tab}
-              onClick={() => { setTopUpTab(tab); setSmfCostEstimate(null) }}
-              className="flex-1 py-1.5 text-sm font-semibold transition-colors"
-              style={{
-                background: topUpTab === tab ? 'rgba(212,175,55,0.15)' : 'transparent',
-                color: topUpTab === tab ? '#d4af37' : 'rgba(255,255,255,0.35)',
-              }}
-            >
-              {tab === 'smf' ? 'Add SMF' : 'Add ETH to Reserve'}
-            </button>
-          ))}
-        </div>
-
         {userSmfBalance !== undefined && (
           <p className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
             Your SMF balance: <span style={{ color: 'rgba(255,255,255,0.65)' }}>{userSmfBalance.toString()} SMF</span>
           </p>
         )}
 
-        {topUpTab === 'smf' && (
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <label className="stat-label">SMF amount</label>
-              <input
-                type="number" min={1}
-                value={smfInput}
-                onChange={e => setSmfInput(e.target.value)}
-                placeholder="e.g. 100"
-                className="input-money"
-              />
-            </div>
-            <button
-              onClick={handleAddSMF}
-              disabled={!smfInput || addSMFPending || addSMFConfirming}
-              className="btn-gold w-full"
-            >
-              {addSMFPending ? 'Confirm…' : addSMFConfirming ? 'Adding…' : 'Add SMF to Portfolio'}
-            </button>
-            {addSMFConfirmed && <p className="text-sm font-semibold" style={{ color: '#34d399' }}>SMF added.</p>}
-            {addSMFError && <p className="text-sm break-all" style={{ color: '#f87171' }}>Error: {addSMFError.message}</p>}
-          </div>
-        )}
-
-        {topUpTab === 'eth' && (
-          <div className="space-y-3">
-            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
-              Burns SMF from your wallet → adds ETH to this NFT's reserve.
-            </p>
-            <div className="space-y-1">
-              <label className="stat-label">ETH amount to add</label>
-              <div className="flex gap-2">
-                <input
-                  type="number" min={0} step="0.001"
-                  value={ethInput}
-                  onChange={e => { setEthInput(e.target.value); setSmfCostEstimate(null) }}
-                  placeholder="e.g. 0.01"
-                  className="input-money flex-1"
-                />
-                <button onClick={handleEstimate} disabled={!ethInput || estimating} className="btn-outline-gold px-3 text-xs">
-                  {estimating ? '…' : 'Estimate'}
-                </button>
-              </div>
-            </div>
-            {smfCostEstimate !== null && (
-              <div className="rounded px-2.5 py-2 text-sm" style={{ background: 'rgba(5,25,14,0.7)', border: '1px solid rgba(212,175,55,0.15)' }}>
-                SMF to burn: <span className="font-bold" style={{ color: '#d4af37' }}>{smfCostEstimate.toString()} SMF</span>
-                <span className="ml-2 text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>(+1% slippage guard)</span>
-              </div>
-            )}
-            <button
-              onClick={handleAddETH}
-              disabled={!ethInput || !smfCostEstimate || addETHPending || addETHConfirming}
-              className="btn-gold w-full"
-            >
-              {addETHPending ? 'Confirm…' : addETHConfirming ? 'Adding…' : 'Add ETH to Reserve'}
-            </button>
-            {addETHConfirmed && <p className="text-sm font-semibold" style={{ color: '#34d399' }}>ETH added to reserve.</p>}
-            {addETHError && <p className="text-sm break-all" style={{ color: '#f87171' }}>Error: {addETHError.message}</p>}
-          </div>
-        )}
+        <div className="space-y-1">
+          <label className="stat-label">SMF amount</label>
+          <input
+            type="number" min={1}
+            value={smfInput}
+            onChange={e => setSmfInput(e.target.value)}
+            placeholder="e.g. 100"
+            className="input-money"
+          />
+        </div>
+        <button
+          onClick={handleAddSMF}
+          disabled={!smfInput || addSMFPending || addSMFConfirming}
+          className="btn-gold w-full"
+        >
+          {addSMFPending ? 'Confirm…' : addSMFConfirming ? 'Adding…' : 'Add SMF to Portfolio'}
+        </button>
+        {addSMFConfirmed && <p className="text-sm font-semibold" style={{ color: '#34d399' }}>SMF added.</p>}
+        {addSMFError && <p className="text-sm break-all" style={{ color: '#f87171' }}>Error: {addSMFError.message}</p>}
       </div>
     )
   }
@@ -480,36 +417,6 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
         </div>
       </div>
 
-      {/* Deploy reserve button — shown to holder when reserve > 0 */}
-      {isHolder && hasReserve && config && config.length > 0 && (
-        <div className="space-y-2">
-          <div className="box-info text-sm" style={{ color: 'rgba(255,255,255,0.55)' }}>
-            {formatEther(reserve!)} ETH in reserve — deploy it into the portfolio basket.
-          </div>
-          <button
-            onClick={() => {
-              resetDeploy()
-              const erc20Count = config.filter(a => a.assetType === 0).length
-              writeDeploy({
-                address: CONTRACT_ADDRESS,
-                abi: SMARTFOLIO_ABI,
-                functionName: 'deploy',
-                args: [id, Array(erc20Count).fill(0n), 0n, 0n, 0n, 0n],
-              })
-            }}
-            disabled={deployPending || deployConfirming}
-            className="btn-outline-gold w-full"
-          >
-            {deployPending ? 'Confirm…' : deployConfirming ? 'Deploying…' : 'Deploy Reserve'}
-          </button>
-          {deployConfirmed && (
-            <p className="text-sm font-semibold" style={{ color: '#34d399' }}>Reserve deployed.</p>
-          )}
-          {deployError && (
-            <p className="text-sm break-all" style={{ color: '#f87171' }}>Error: {deployError.message}</p>
-          )}
-        </div>
-      )}
 
       {/* Tier info */}
       {tierInfo !== undefined && smfWeightBps !== undefined && (
