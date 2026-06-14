@@ -50,6 +50,24 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
   const smfWeightBps = tierInfo?.[0]
   const tier         = tierInfo?.[1]
   const isHolder     = isConnected && holderBalance !== undefined && holderBalance > 0n
+
+  // Fetch ERC20 holdings for each ERC20 asset in config
+  const erc20Assets = config?.filter(a => a.assetType === 0) ?? []
+  const { data: holdingsData } = useReadContracts({
+    contracts: erc20Assets.map(a => ({
+      address: CONTRACT_ADDRESS,
+      abi: SMARTFOLIO_ABI,
+      functionName: 'portfolioHoldings' as const,
+      args: [id, a.token as `0x${string}`],
+    })),
+    query: { enabled: erc20Assets.length > 0 },
+  })
+  const erc20Holdings: Record<string, bigint> = Object.fromEntries(
+    erc20Assets.map((a, i) => [
+      a.token.toLowerCase(),
+      holdingsData?.[i]?.status === 'success' ? (holdingsData[i].result as bigint) : 0n,
+    ])
+  )
   const hasReserve   = reserve !== undefined && reserve > 0n
   const hasErc20     = config !== undefined && config.some(a => a.assetType === 0)
 
@@ -344,37 +362,49 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
         <div className="space-y-1.5">
           <p className="stat-label">Asset Allocation</p>
           <div className="space-y-1">
-            {config.map((asset, i) => (
-              <div
-                key={i}
-                className="flex items-center justify-between rounded px-2.5 py-1.5 text-sm"
-                style={{ background: 'rgba(5,25,14,0.5)', border: '1px solid rgba(212,175,55,0.08)' }}
-              >
-                <div className="flex items-center gap-2">
-                  <span
-                    className="text-xs font-bold px-1.5 py-0.5 rounded"
-                    style={
-                      asset.assetType === 3
-                        ? { background: 'rgba(212,175,55,0.15)', color: '#d4af37' }
-                        : { background: 'rgba(52,211,153,0.1)', color: '#34d399' }
-                    }
-                  >
-                    {ASSET_TYPE_LABELS[asset.assetType] ?? `Type ${asset.assetType}`}
-                  </span>
-                  <span
-                    className="font-mono text-xs truncate"
-                    style={{ color: 'rgba(255,255,255,0.45)', maxWidth: '11rem' }}
-                  >
-                    {asset.token === '0x0000000000000000000000000000000000000000'
-                      ? 'WETH (Aave)'
-                      : asset.token}
-                  </span>
+            {config.map((asset, i) => {
+              const holding = asset.assetType === 0
+                ? erc20Holdings[asset.token.toLowerCase()]
+                : undefined
+              return (
+                <div
+                  key={i}
+                  className="rounded px-2.5 py-1.5 text-sm"
+                  style={{ background: 'rgba(5,25,14,0.5)', border: '1px solid rgba(212,175,55,0.08)' }}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="text-xs font-bold px-1.5 py-0.5 rounded"
+                        style={
+                          asset.assetType === 3
+                            ? { background: 'rgba(212,175,55,0.15)', color: '#d4af37' }
+                            : { background: 'rgba(52,211,153,0.1)', color: '#34d399' }
+                        }
+                      >
+                        {ASSET_TYPE_LABELS[asset.assetType] ?? `Type ${asset.assetType}`}
+                      </span>
+                      <span
+                        className="font-mono text-xs truncate"
+                        style={{ color: 'rgba(255,255,255,0.45)', maxWidth: '9rem' }}
+                      >
+                        {asset.token === '0x0000000000000000000000000000000000000000'
+                          ? 'WETH (Aave)'
+                          : asset.token}
+                      </span>
+                    </div>
+                    <span className="font-bold" style={{ color: '#d4af37' }}>
+                      {(asset.weightBps / 100).toFixed(0)}%
+                    </span>
+                  </div>
+                  {holding !== undefined && holding > 0n && (
+                    <div className="mt-1 text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                      Balance: <span style={{ color: 'rgba(255,255,255,0.65)' }}>{formatEther(holding)}</span>
+                    </div>
+                  )}
                 </div>
-                <span className="font-bold" style={{ color: '#d4af37' }}>
-                  {(asset.weightBps / 100).toFixed(0)}%
-                </span>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
