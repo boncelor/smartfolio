@@ -143,9 +143,9 @@ Leverage tokens are not explicitly blocked by `burn()`. However, leverage tokens
 
 ### 3.6 Pre-Deployment Exit — `withdrawSMF(id)`
 
-Before the keeper deploys a Portfolio NFT (i.e. `portfolioActive[id] == false`), the holder may exit via `withdrawSMF(id)`. This burns the ERC1155 token (exactly 1) and transfers the full `portfolioSMFHoldings[id]` balance directly back to the caller as SMF tokens — no ETH conversion, no bonding curve interaction, no fee. Any ETH in `reserve[id]` is also returned.
+`withdrawSMF(id)` is available only when `portfolioActive[id] == false`. It burns the ERC1155 token (exactly 1) and transfers the full `portfolioSMFHoldings[id]` balance directly back to the caller as SMF tokens — no ETH conversion, no bonding curve interaction, no fee. Any ETH in `reserve[id]` is also returned.
 
-This is the clean exit for a freshly minted NFT that has not yet been deployed.
+NFTs minted via `mintWithSMF` have `portfolioActive[id] = true` from the moment they are created (the SMF is already inside the portfolio at mint time), so `withdrawSMF` is not reachable for them. Holders of these NFTs exit via `divest()`, which sells their SMF slice back through the bonding curve and returns ETH.
 
 ---
 
@@ -336,7 +336,7 @@ A user calls `mintNFT()`:
 
 1. `smfCost = _nftMintCost()` — dynamic cost, fully deterministic from on-chain state (no oracle).
 2. Transfers `smfCost` SMF from the caller to `SmartfolioERC20` via `transferFrom` (caller must have pre-approved `smfContract`).
-3. `SmartfolioERC20` forwards the SMF to the Smartfolio proxy via `Smartfolio.mintWithSMF(caller, smfCost)`, which auto-assigns a new token ID, mints 1 ERC1155 to the caller, credits `portfolioSMFHoldings[id] += smfCost`, and writes a default portfolio config of **100% SMF** (single asset, `weightBps = 10000`). **No ETH moves at mint time.**
+3. `SmartfolioERC20` forwards the SMF to the Smartfolio proxy via `Smartfolio.mintWithSMF(caller, smfCost)`, which auto-assigns a new token ID, mints 1 ERC1155 to the caller, credits `portfolioSMFHoldings[id] += smfCost`, writes a default portfolio config of **100% SMF** (single asset, `weightBps = 10000`), and immediately sets `portfolioActive[id] = true` — the SMF is already inside the portfolio, so no separate deploy step is required. **No ETH moves at mint time.**
 4. Increments `nftCount` and `totalSmfLockedInNFTs`.
 5. Returns the newly assigned `id`.
 

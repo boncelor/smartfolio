@@ -65,6 +65,7 @@ contract SmartfolioTreasury is SmartfolioBase, ERC1155Upgradeable {
         globalTotalMinted += 1;
         globalTotalSupply += 1;
         portfolioSMFHoldings[id] += smfAmount;
+        portfolioActive[id] = true;           // SMF already inside — no separate deploy needed
         smfContractForNFT[id] = smfContract;
         IERC20(smfContract).transferFrom(msg.sender, address(this), smfAmount);
         _mint(to, id, 1, "");

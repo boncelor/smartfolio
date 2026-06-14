@@ -484,9 +484,10 @@ contract("SmartfolioERC20", (accounts) => {
       await smf.addETHToNFT(TOKEN_ID, ethToAdd, smfToBurn, { from: alice });
       assert.ok(new BN(await sf.reserve(TOKEN_ID)).gt(new BN("0")));
 
-      // Burn NFT — receive ETH from reserve
+      // Divest NFT — portfolio is active from mint so burn() is blocked; use divest()
+      // divest() sells SMF slice via bonding curve and returns ETH from reserve
       const ethBefore = new BN(await web3.eth.getBalance(alice));
-      await sf.burn(TOKEN_ID, 1, { from: alice });
+      await sf.divest(TOKEN_ID, 1, 0, { from: alice });
       const ethAfter = new BN(await web3.eth.getBalance(alice));
       assert.ok(ethAfter.gt(ethBefore.sub(new BN(toWei("0.01")))));
       assert.equal((await sf.balanceOf(alice, TOKEN_ID)).toString(), "0");
