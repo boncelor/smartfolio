@@ -51,8 +51,10 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
   const tier         = tierInfo?.[1]
   const isHolder     = isConnected && holderBalance !== undefined && holderBalance > 0n
 
-  // Fetch ERC20 holdings for each ERC20 asset in config
+  // Fetch ERC20 holdings and symbols for each ERC20 asset in config
   const erc20Assets = config?.filter(a => a.assetType === 0) ?? []
+  const ERC20_SYMBOL_ABI = [{ name: 'symbol', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'string' }] }] as const
+
   const { data: holdingsData } = useReadContracts({
     contracts: erc20Assets.map(a => ({
       address: CONTRACT_ADDRESS,
@@ -62,10 +64,26 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
     })),
     query: { enabled: erc20Assets.length > 0 },
   })
+
+  const { data: symbolsData } = useReadContracts({
+    contracts: erc20Assets.map(a => ({
+      address: a.token as `0x${string}`,
+      abi: ERC20_SYMBOL_ABI,
+      functionName: 'symbol' as const,
+    })),
+    query: { enabled: erc20Assets.length > 0 },
+  })
+
   const erc20Holdings: Record<string, bigint> = Object.fromEntries(
     erc20Assets.map((a, i) => [
       a.token.toLowerCase(),
       holdingsData?.[i]?.status === 'success' ? (holdingsData[i].result as bigint) : 0n,
+    ])
+  )
+  const erc20Symbols: Record<string, string> = Object.fromEntries(
+    erc20Assets.map((a, i) => [
+      a.token.toLowerCase(),
+      symbolsData?.[i]?.status === 'success' ? (symbolsData[i].result as string) : a.token.slice(0, 8) + '…',
     ])
   )
   const hasReserve   = reserve !== undefined && reserve > 0n
@@ -385,11 +403,15 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
                         {ASSET_TYPE_LABELS[asset.assetType] ?? `Type ${asset.assetType}`}
                       </span>
                       <span
-                        className="font-mono text-xs truncate"
-                        style={{ color: 'rgba(255,255,255,0.45)', maxWidth: '9rem' }}
+                        className="text-xs truncate"
+                        style={{ color: 'rgba(255,255,255,0.65)', maxWidth: '9rem' }}
                       >
-                        {asset.token === '0x0000000000000000000000000000000000000000'
+                        {asset.assetType === 0
+                          ? erc20Symbols[asset.token.toLowerCase()] ?? asset.token
+                          : asset.assetType === 1
                           ? 'WETH (Aave)'
+                          : asset.assetType === 3
+                          ? 'SMF'
                           : asset.token}
                       </span>
                     </div>
