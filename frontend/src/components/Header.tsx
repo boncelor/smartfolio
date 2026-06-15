@@ -49,7 +49,7 @@ export default function Header() {
             <Stat label="TVL" value={tvl !== undefined ? `${parseFloat(formatEther(tvl)).toFixed(4)} ETH` : '—'} />
             <Stat label="Total SMF" value={smfSupply !== undefined ? smfSupply.toString() : '—'} />
             {address && smfBalance !== undefined && (
-              <Stat label="Your SMF" value={smfBalance.toString()} highlight />
+              <Stat label="Your SMF" value={parseFloat(formatEther(smfBalance)).toLocaleString(undefined, { maximumFractionDigits: 2 })} highlight />
             )}
             <Stat label="Backing ETH" value={smfBacking?.[0]?.status === 'success' ? `${parseFloat(formatEther(smfBacking[0].result as bigint)).toFixed(4)} ETH` : '—'} />
           </div>

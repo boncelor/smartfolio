@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAccount, usePublicClient } from 'wagmi'
-import { formatEther } from 'viem'
+import { formatEther, parseUnits } from 'viem'
 import { CONTRACT_ADDRESS, SMARTFOLIO_ABI, SMF_ADDRESS, SMF_ABI } from '../contracts'
 import PortfolioConfigForm from './PortfolioConfigForm'
 import { buildRebalanceInstructions, type RebalancePreview } from '../utils/rebalanceInstructions'
@@ -315,7 +315,7 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
         address: SMF_ADDRESS,
         abi: SMF_ABI,
         functionName: 'addSMFToNFT',
-        args: [id, BigInt(smfInput)],
+        args: [id, parseUnits(smfInput, 18)],
       })
     }
 
@@ -336,7 +336,7 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
 
         {userSmfBalance !== undefined && (
           <p className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
-            Your SMF balance: <span style={{ color: 'rgba(255,255,255,0.65)' }}>{userSmfBalance.toString()} SMF</span>
+            Your SMF balance: <span style={{ color: 'rgba(255,255,255,0.65)' }}>{parseFloat(formatEther(userSmfBalance)).toLocaleString(undefined, { maximumFractionDigits: 2 })} SMF</span>
           </p>
         )}
 
@@ -446,7 +446,7 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
             className="rounded px-2.5 py-1.5 flex items-center justify-between text-sm"
             style={{ background: 'rgba(5,25,14,0.7)', border: '1px solid rgba(212,175,55,0.12)' }}
           >
-            <span className="font-semibold text-white">{smfHoldings.toString()} SMF</span>
+            <span className="font-semibold text-white">{parseFloat(formatEther(smfHoldings)).toLocaleString(undefined, { maximumFractionDigits: 4 })} SMF</span>
           </div>
         </div>
       )}

@@ -1,6 +1,6 @@
 import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi'
 import { useState, useEffect } from 'react'
-import { decodeEventLog } from 'viem'
+import { decodeEventLog, parseUnits, formatEther } from 'viem'
 import { SMF_ADDRESS, SMF_ABI } from '../contracts'
 
 type Phase = 'idle' | 'approving' | 'minting' | 'approving-top' | 'topping-up' | 'done'
@@ -12,7 +12,11 @@ export default function MintNewForm() {
   const [phase, setPhase] = useState<Phase>('idle')
   const { isConnected, address } = useAccount()
 
-  const parsedExtra = parseInt(extraSmf) || 0
+  // Parse extra SMF as 18-decimal units for contract calls; raw number for display/logic
+  const parsedExtraUnits = extraSmf && !isNaN(Number(extraSmf)) && Number(extraSmf) > 0
+    ? parseUnits(extraSmf, 18)
+    : 0n
+  const hasExtra = parsedExtraUnits > 0n
 
   // Base mint cost (single uint256 now)
   const { data: smfRequired, error: smfError, isLoading: smfLoading } = useReadContract({
@@ -31,7 +35,7 @@ export default function MintNewForm() {
     query: { enabled: !!address },
   })
 
-  const totalSmf = smfRequired !== undefined ? smfRequired + BigInt(parsedExtra) : undefined
+  const totalSmf = smfRequired !== undefined ? smfRequired + parsedExtraUnits : undefined
   const insufficientBalance = smfBalance !== undefined && totalSmf !== undefined && smfBalance < totalSmf
   const costError = !smfLoading && smfError != null
 
@@ -71,7 +75,7 @@ export default function MintNewForm() {
         }
       } catch { /* not this event */ }
     }
-    if (parsedExtra > 0) {
+    if (hasExtra) {
       setPhase('approving-top')
     } else {
       setPhase('done')
@@ -82,7 +86,7 @@ export default function MintNewForm() {
     if (phase === 'approving-top' && mintedId !== null) {
       writeApproveTop({
         address: SMF_ADDRESS, abi: SMF_ABI, functionName: 'approve',
-        args: [SMF_ADDRESS, BigInt(parsedExtra)],
+        args: [SMF_ADDRESS, parsedExtraUnits],
       })
     }
   }, [phase, mintedId])
@@ -92,7 +96,7 @@ export default function MintNewForm() {
       setPhase('topping-up')
       writeTopUp({
         address: SMF_ADDRESS, abi: SMF_ABI, functionName: 'addSMFToNFT',
-        args: [mintedId, BigInt(parsedExtra)],
+        args: [mintedId, parsedExtraUnits],
       })
     }
   }, [phase, approveTopConfirmed])
@@ -128,7 +132,7 @@ export default function MintNewForm() {
     if (phase === 'approving' && approveConfirming) return 'Approving…'
     if (phase === 'minting' && mintPending) return 'Confirm mint in wallet…'
     if (phase === 'minting' && mintConfirming) return 'Minting…'
-    if (phase === 'approving-top' && approveTopPending) return 'Confirm top-up approval…'
+    if (phase === 'approving-top' && approveTopPending) return 'Confirm approval…'
     if (phase === 'approving-top' && approveTopConfirming) return 'Approving…'
     if (phase === 'topping-up' && topUpPending) return 'Confirm top-up in wallet…'
     if (phase === 'topping-up' && topUpConfirming) return 'Adding SMF…'
@@ -137,7 +141,7 @@ export default function MintNewForm() {
 
   const anyError = approveError || mintError || approveTopError || topUpError
 
-  const txCount = parsedExtra > 0 ? 4 : 2
+  const txCount = hasExtra ? 4 : 2
 
   return (
     <div className="card space-y-4">
@@ -178,7 +182,7 @@ export default function MintNewForm() {
                   <label className="stat-label">Extra SMF to add to portfolio</label>
                   {smfBalance !== undefined && (
                     <span className="text-xs" style={{ color: 'rgba(212,175,55,0.5)' }}>
-                      Balance: {smfBalance.toString()} SMF
+                      Balance: {parseFloat(formatEther(smfBalance as bigint)).toLocaleString(undefined, { maximumFractionDigits: 2 })} SMF
                     </span>
                   )}
                 </div>
@@ -197,17 +201,17 @@ export default function MintNewForm() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between box-info">
                   <span className="stat-label" style={{ marginBottom: 0 }}>Mint cost</span>
-                  <span className="font-semibold text-gold">{smfRequired.toString()} SMF</span>
+                  <span className="font-semibold text-gold">{parseFloat(formatEther(smfRequired as bigint)).toLocaleString(undefined, { maximumFractionDigits: 4 })} SMF</span>
                 </div>
-                {parsedExtra > 0 && (
+                {hasExtra && (
                   <div className="flex items-center justify-between box-info">
                     <span className="stat-label" style={{ marginBottom: 0 }}>Extra to portfolio</span>
-                    <span className="font-semibold text-gold">{parsedExtra} SMF</span>
+                    <span className="font-semibold text-gold">{extraSmf} SMF</span>
                   </div>
                 )}
                 <div className="flex items-center justify-between box-info">
                   <span className="stat-label" style={{ marginBottom: 0 }}>Total SMF</span>
-                  <span className="font-semibold text-gold">{(smfRequired + BigInt(parsedExtra)).toString()} SMF</span>
+                  <span className="font-semibold text-gold">{parseFloat(formatEther((smfRequired as bigint) + parsedExtraUnits)).toLocaleString(undefined, { maximumFractionDigits: 4 })} SMF</span>
                 </div>
               </div>
 
@@ -217,7 +221,7 @@ export default function MintNewForm() {
 
               {insufficientBalance && (
                 <p className="text-xs" style={{ color: '#f87171' }}>
-                  Insufficient balance ({smfBalance?.toString()} available, {totalSmf?.toString()} needed)
+                  Insufficient balance ({parseFloat(formatEther(smfBalance as bigint)).toLocaleString(undefined, { maximumFractionDigits: 2 })} available, {parseFloat(formatEther(totalSmf as bigint)).toLocaleString(undefined, { maximumFractionDigits: 4 })} needed)
                 </p>
               )}
             </>
@@ -229,8 +233,8 @@ export default function MintNewForm() {
               {[
                 { label: 'Approve mint cost', done: ['minting','approving-top','topping-up','done'].includes(phase) },
                 { label: 'Mint NFT', done: ['approving-top','topping-up','done'].includes(phase) },
-                ...(parsedExtra > 0 ? [
-                  { label: `Approve ${parsedExtra} extra SMF`, done: ['topping-up','done'].includes(phase) },
+                ...(hasExtra ? [
+                  { label: `Approve ${extraSmf} extra SMF`, done: ['topping-up','done'].includes(phase) },
                   { label: 'Add SMF to portfolio', done: ['done'].includes(phase) },
                 ] : []),
               ].map((step, i) => (
@@ -256,7 +260,7 @@ export default function MintNewForm() {
           {phase === 'done' && mintedId !== null && (
             <>
               <p className="text-sm font-semibold" style={{ color: '#34d399' }}>
-                NFT #{mintedId.toString()} minted{parsedExtra > 0 ? ` with ${(smfRequired ?? 0n) + BigInt(parsedExtra)} SMF` : ''}.
+                NFT #{mintedId.toString()} minted{hasExtra ? ` with ${parseFloat(formatEther((smfRequired ?? 0n) + parsedExtraUnits)).toLocaleString(undefined, { maximumFractionDigits: 4 })} SMF` : ''}.
               </p>
               <button onClick={handleReset} className="btn-money" style={{ opacity: 0.7 }}>
                 Mint another

@@ -74,7 +74,8 @@ export default function SMFPanel() {
     }
   }
 
-  const maxBurn = balance !== undefined ? Number(balance) : undefined
+  // Balance is 18-dec ERC20 units; convert to whole-token count for comparison with parsedAmount
+  const maxBurn = balance !== undefined ? Math.floor(Number(formatEther(balance as bigint))) : undefined
 
   const isDisabled = !isConnected || isPending || isConfirming || (
     action === 'mint' ? (buyCost === undefined || !isValid) :
@@ -119,13 +120,13 @@ export default function SMFPanel() {
       <div className="space-y-1">
         <div className="flex items-center justify-between">
           <label className="stat-label">SMF amount</label>
-          {action === 'burn' && balance !== undefined && (
+          {action === 'burn' && maxBurn !== undefined && (
             <button
               className="text-xs"
               style={{ color: 'rgba(212,175,55,0.6)' }}
-              onClick={() => setAmount(balance.toString())}
+              onClick={() => setAmount(maxBurn.toString())}
             >
-              Balance: {balance.toString()} SMF
+              Balance: {maxBurn.toLocaleString()} SMF
             </button>
           )}
         </div>
@@ -145,7 +146,7 @@ export default function SMFPanel() {
           </span>
         </div>
         {action === 'burn' && maxBurn !== undefined && parsedAmount > maxBurn && (
-          <p className="text-xs" style={{ color: '#f87171' }}>Exceeds your balance of {maxBurn} SMF</p>
+          <p className="text-xs" style={{ color: '#f87171' }}>Exceeds your balance of {maxBurn?.toLocaleString()} SMF</p>
         )}
       </div>
 
