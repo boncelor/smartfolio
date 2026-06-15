@@ -86,7 +86,7 @@ export default function InfoCard({ tokenId }: Props) {
       <div className="grid grid-cols-3 gap-4">
         <div>
           <p className="stat-label">SMF Balance</p>
-          <p className="stat-value">{smfHoldings !== undefined ? smfHoldings.toString() : '—'} SMF</p>
+          <p className="stat-value">{smfHoldings !== undefined ? parseFloat(formatEther(smfHoldings)).toLocaleString(undefined, { maximumFractionDigits: 4 }) : '—'} SMF</p>
         </div>
         <div>
           <p className="stat-label">ETH Balance</p>

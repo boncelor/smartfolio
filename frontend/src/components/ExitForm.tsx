@@ -52,7 +52,7 @@ export default function ExitForm({ tokenId }: Props) {
         {smfHoldings !== undefined && smfHoldings > 0n && (
           <div className="flex items-center justify-between box-info text-sm">
             <span className="stat-label" style={{ marginBottom: 0 }}>SMF returned</span>
-            <span className="font-semibold text-gold">{smfHoldings.toString()} SMF</span>
+            <span className="font-semibold text-gold">{parseFloat(formatEther(smfHoldings)).toLocaleString(undefined, { maximumFractionDigits: 4 })} SMF</span>
           </div>
         )}
         {ethReserve !== undefined && ethReserve > 0n && (
