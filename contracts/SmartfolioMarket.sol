@@ -233,6 +233,84 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
         emit PortfolioLPDeployed(id, posTokenId, liquidity);
     }
 
+    /**
+     * @notice Full portfolio rebalance — all settlement flows through reserve[id].
+     *
+     * Intended instruction order (enforced off-chain):
+     *   1. SMF sells  (overweight SMF → ETH → reserve)
+     *   2. ERC20 sells (overweight ERC20 → WETH → ETH → reserve)
+     *   3. ERC20 buys  (reserve ETH → WETH → underweight ERC20)
+     *   4. SMF buy     (reserve ETH → bonding curve → SMF) — must be last
+     *
+     * SMF instructions are identified by inst.token == smfContract.
+     */
+    function rebalanceAll(uint256 id, RebalanceAllInstruction[] calldata instructions) external {
+        if (instructions.length == 0) revert NoInstructions();
+        if (smfContract == address(0)) revert SMFContractNotSet();
+
+        for (uint256 i = 0; i < instructions.length; i++) {
+            RebalanceAllInstruction calldata inst = instructions[i];
+
+            if (inst.token == smfContract) {
+                // ---- SMF instruction ----
+                if (inst.isSell) {
+                    uint256 smfTokens = inst.amountIn / WAD;
+                    if (smfTokens == 0) continue;
+                    if (portfolioSMFHoldings[id] < smfTokens * WAD) revert InsufficientHoldings();
+
+                    uint256 ethBefore = address(this).balance;
+                    ISMFToken(smfContract).sellSMF(smfTokens, inst.amountOutMin);
+                    uint256 ethReceived = address(this).balance - ethBefore;
+
+                    portfolioSMFHoldings[id] -= smfTokens * WAD;
+                    reserve[id] += ethReceived;
+                } else {
+                    // Buy SMF with ETH from reserve
+                    uint256 ethAmount = inst.amountIn;
+                    if (reserve[id] < ethAmount) revert InsufficientHoldings();
+                    reserve[id] -= ethAmount;
+
+                    uint256 minSmf = inst.amountOutMin;
+                    if (minSmf == 0) {
+                        uint256 est = ISMFToken(smfContract).smfAmountForBuy(ethAmount);
+                        minSmf = est * 99 / 100;
+                        if (minSmf == 0) revert AmountZero();
+                    }
+
+                    uint256 smfBefore = ISMFToken(smfContract).balanceOf(address(this));
+                    ISMFToken(smfContract).buySMF{value: ethAmount}(minSmf);
+                    uint256 smfReceived = ISMFToken(smfContract).balanceOf(address(this)) - smfBefore;
+                    portfolioSMFHoldings[id] += smfReceived;
+                }
+            } else {
+                // ---- ERC20 instruction ----
+                if (inst.isSell) {
+                    if (portfolioHoldings[id][inst.token] < inst.amountIn) revert InsufficientHoldings();
+                    portfolioHoldings[id][inst.token] -= inst.amountIn;
+
+                    bytes memory path = inst.sellSwapPath.length > 0 ? inst.sellSwapPath : inst.swapPath;
+                    uint256 wethReceived = _swapTokenForWETH(
+                        inst.token, inst.amountIn, inst.amountOutMin, inst.poolFee, path
+                    );
+                    weth.withdraw(wethReceived);
+                    reserve[id] += wethReceived;
+                } else {
+                    if (reserve[id] < inst.amountIn) revert InsufficientHoldings();
+                    reserve[id] -= inst.amountIn;
+                    weth.deposit{value: inst.amountIn}();
+
+                    uint256 amountOut = _swapWETHForToken(
+                        inst.token, inst.amountIn, inst.amountOutMin, inst.poolFee, inst.swapPath
+                    );
+                    if (amountOut == 0) revert ZeroSwapOutput();
+                    portfolioHoldings[id][inst.token] += amountOut;
+                }
+            }
+        }
+
+        emit Rebalanced(id);
+    }
+
     function rebalance(uint256 id, RebalanceInstruction[] calldata instructions) external {
         if (instructions.length == 0) revert NoInstructions();
 

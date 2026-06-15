@@ -147,6 +147,22 @@ abstract contract SmartfolioBase {
         bytes swapPath;
     }
 
+    /// @dev Instruction for rebalanceAll — routes all settlement through reserve[id].
+    ///      SMF instructions are identified by token == smfContract.
+    ///      For SMF sells: amountIn is in wei (18-decimal units); contract converts to whole tokens.
+    ///      For SMF buys: amountIn is ETH in wei to spend buying SMF.
+    ///      For ERC20 sells: amountIn is token amount in wei; sellSwapPath used for multi-hop sells.
+    ///      For ERC20 buys:  amountIn is ETH in wei to spend; swapPath used for multi-hop buys.
+    struct RebalanceAllInstruction {
+        address token;
+        bool isSell;
+        uint256 amountIn;
+        uint256 amountOutMin;
+        uint24 poolFee;
+        bytes swapPath;
+        bytes sellSwapPath;
+    }
+
     // -------------------------------------------------------------------------
     // Constants
     // -------------------------------------------------------------------------

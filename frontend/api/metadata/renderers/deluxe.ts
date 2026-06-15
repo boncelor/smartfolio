@@ -168,17 +168,6 @@ function buildSvg(ctx: RenderContext): string {
       <stop offset="40%"  stop-color="${D.purple}" stop-opacity="0.05"/>
       <stop offset="100%" stop-color="${D.teal}"   stop-opacity="0.04"/>
     </linearGradient>
-    <!-- Crystal texture filter -->
-    <filter id="grain" x="0%" y="0%" width="100%" height="100%">
-      <feTurbulence type="fractalNoise" baseFrequency="0.55 0.4" numOctaves="5"
-        seed="13" stitchTiles="stitch" result="noise"/>
-      <feColorMatrix type="matrix"
-        values="0.08 0 0 0 0.03
-                0.04 0 0 0 0.01
-                0.12 0 0 0 0.06
-                0    0 0 9 -4" in="noise" result="tinted"/>
-      <feBlend in="SourceGraphic" in2="tinted" mode="screen"/>
-    </filter>
     <clipPath id="card-clip">
       <rect width="${W}" height="${totalH}" rx="24"/>
     </clipPath>
@@ -187,7 +176,6 @@ function buildSvg(ctx: RenderContext): string {
 
   <!-- Background -->
   <rect width="${W}" height="${totalH}" fill="url(#bg)" rx="24"/>
-  <rect width="${W}" height="${totalH}" rx="24" fill="white" fill-opacity="0.001" filter="url(#grain)"/>
   <!-- Iridescent overlay -->
   <rect width="${W}" height="${totalH}" rx="24" fill="url(#iris)"/>
 

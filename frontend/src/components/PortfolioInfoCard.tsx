@@ -3,7 +3,7 @@ import { useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAc
 import { formatEther, parseUnits } from 'viem'
 import { CONTRACT_ADDRESS, SMARTFOLIO_ABI, SMF_ADDRESS, SMF_ABI } from '../contracts'
 import PortfolioConfigForm from './PortfolioConfigForm'
-import { buildRebalanceInstructions, type RebalancePreview } from '../utils/rebalanceInstructions'
+import { buildRebalanceAllInstructions, type RebalancePreview } from '../utils/rebalanceInstructions'
 
 interface Props {
   tokenId: number
@@ -91,6 +91,8 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
   )
   const hasReserve   = reserve !== undefined && reserve > 0n
   const hasErc20     = config !== undefined && config.some(a => a.assetType === 0)
+  const hasEthSlice  = config !== undefined && config.some(a => a.assetType === 5)
+  const ethSliceUnfunded = isHolder && hasEthSlice && !hasReserve
 
   // Rebalance is needed when:
   // 1. ETH is sitting in reserve and the config has assets to deploy into (deploy needed)
@@ -103,7 +105,9 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
   )
   const hasErc20Drift = hasErc20 && erc20HasAnyHoldings && erc20HasAnyZeroHoldings
   const needsDeploy = isHolder && hasReserve && config !== undefined && config.length > 0
-  const needsRebalance = isHolder && (hasErc20Drift || needsDeploy)
+  // Show rebalance whenever the holder has ERC20 assets (to allow weight adjustments),
+  // has reserve to deploy, or has an unfunded ETH slice in config
+  const needsRebalance = isHolder && (hasErc20 || needsDeploy || ethSliceUnfunded)
 
   // Rebalance write
   const { writeContract: writeRebalance, data: rebalanceHash, isPending: rebalancePending, error: rebalanceError, reset: resetRebalance } = useWriteContract()
@@ -140,15 +144,13 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
 
   // --- Rebalance mode ---
   if (mode === 'rebalance') {
-    const erc20Count = config?.filter(a => a.assetType === 0).length ?? 0
-
     async function handleQuote() {
       if (!config || !publicClient) return
       setQuoting(true)
       setPreview(null)
       resetRebalance()
 
-      // Fetch current ERC20 holdings
+      // Fetch fresh ERC20 holdings
       const erc20Assets = config.filter(a => a.assetType === 0)
       const holdingResults = await Promise.all(
         erc20Assets.map(a =>
@@ -162,11 +164,31 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
       )
       const holdings: Record<string, bigint> = Object.fromEntries(holdingResults)
 
-      const result = await buildRebalanceInstructions(
-        config.map(a => ({ ...a, swapFee: 0, tickLower: 0, tickUpper: 0, swapPath: '0x', sellSwapPath: (a as { sellSwapPath?: string }).sellSwapPath ?? '0x' })),
+      // SMF burn value query via bonding curve
+      const smfBurnValueFn = async (wholeTokens: bigint): Promise<bigint> => {
+        return publicClient.readContract({
+          address: SMF_ADDRESS,
+          abi: SMF_ABI,
+          functionName: 'smfBurnValue',
+          args: [wholeTokens],
+        }) as Promise<bigint>
+      }
+
+      const result = await buildRebalanceAllInstructions(
+        config.map(a => ({
+          ...a,
+          swapFee: (a as { swapFee?: number }).swapFee ?? 0,
+          tickLower: (a as { tickLower?: number }).tickLower ?? 0,
+          tickUpper: (a as { tickUpper?: number }).tickUpper ?? 0,
+          swapPath: (a as { swapPath?: string }).swapPath ?? '0x',
+          sellSwapPath: (a as { sellSwapPath?: string }).sellSwapPath ?? '0x',
+        })),
+        smfHoldings ?? 0n,
         holdings,
+        reserve ?? 0n,
         WETH_ADDRESS,
         publicClient,
+        smfBurnValueFn,
       )
       setPreview(result)
       setQuoting(false)
@@ -178,7 +200,7 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
       writeRebalance({
         address: CONTRACT_ADDRESS,
         abi: SMARTFOLIO_ABI,
-        functionName: 'rebalance',
+        functionName: 'rebalanceAll',
         args: [
           id,
           preview.instructions.map(inst => ({
@@ -193,6 +215,11 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
         ],
       })
     }
+
+    const tokenLabel = (addr: string) =>
+      addr.toLowerCase() === SMF_ADDRESS.toLowerCase()
+        ? 'SMF'
+        : erc20Symbols[addr.toLowerCase()] ?? addr.slice(0, 8) + '…'
 
     return (
       <div className="card space-y-4">
@@ -209,19 +236,23 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
           </button>
         </div>
 
-        {/* Deploy reserve section — shown when ETH is waiting in reserve */}
+        <p className="text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>
+          Rebalances SMF and ERC20 positions to match config weights. SMF sells go via bonding curve;
+          ERC20s swap via Uniswap. All settlement flows through the ETH reserve. AAVE and LP slices are not touched.
+        </p>
+
+        {/* Deploy reserve section — shown when there is fresh ETH in reserve to deploy */}
         {needsDeploy && reserve !== undefined && (
-          <div className="space-y-2 pb-2" style={{ borderBottom: hasErc20Drift ? '1px solid rgba(212,175,55,0.1)' : undefined }}>
+          <div className="space-y-2 pb-3" style={{ borderBottom: '1px solid rgba(212,175,55,0.1)' }}>
             <p className="stat-label">Deploy Reserve</p>
             <p className="text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>
-              {formatEther(reserve)} ETH in reserve — deploy into the portfolio basket per config weights.
+              {formatEther(reserve)} ETH in reserve — deploy into basket per config weights first.
             </p>
             <button
               onClick={() => {
                 if (!config || reserve === undefined) return
                 resetDeploy()
                 const erc20Count = config.filter(a => a.assetType === 0).length
-                // smfMinAmount = 0 → contract auto-computes with 1% slippage on-chain
                 writeDeploy({
                   address: CONTRACT_ADDRESS,
                   abi: SMARTFOLIO_ABI,
@@ -239,20 +270,10 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
           </div>
         )}
 
-        {/* ERC20 rebalance section — shown when ERC20 drift detected */}
-        {hasErc20Drift && (
-          <>
-            <p className="text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>
-              Sells all {erc20Count} ERC20 holdings → re-buys proportionally to current config weights.
-              SMF, AAVE, and LP slices are not touched.
-            </p>
-
-            {!preview && (
-              <button onClick={handleQuote} disabled={quoting} className="btn-outline-gold">
-                {quoting ? 'Getting quotes…' : 'Get Quote'}
-              </button>
-            )}
-          </>
+        {!preview && (
+          <button onClick={handleQuote} disabled={quoting} className="btn-outline-gold">
+            {quoting ? 'Getting quotes…' : 'Get Quote'}
+          </button>
         )}
 
         {preview?.error && (
@@ -261,24 +282,28 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
 
         {preview && !preview.error && (
           <div className="space-y-3">
-            <div className="space-y-1">
-              <p className="stat-label">Sells</p>
-              {preview.sells.map((s, i) => (
-                <div key={i} className="flex justify-between text-sm rounded px-2.5 py-1.5" style={{ background: 'rgba(5,25,14,0.5)', border: '1px solid rgba(212,175,55,0.08)' }}>
-                  <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>{s.token.slice(0,10)}…</span>
-                  <span style={{ color: '#f87171' }}>→ ~{formatEther(s.estimatedWeth)} WETH</span>
-                </div>
-              ))}
-            </div>
-            <div className="space-y-1">
-              <p className="stat-label">Buys</p>
-              {preview.buys.map((b, i) => (
-                <div key={i} className="flex justify-between text-sm rounded px-2.5 py-1.5" style={{ background: 'rgba(5,25,14,0.5)', border: '1px solid rgba(212,175,55,0.08)' }}>
-                  <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>{b.token.slice(0,10)}…</span>
-                  <span style={{ color: '#34d399' }}>{formatEther(b.amountIn)} WETH ({(b.weightBps / 100).toFixed(0)}%)</span>
-                </div>
-              ))}
-            </div>
+            {preview.sells.length > 0 && (
+              <div className="space-y-1">
+                <p className="stat-label">Sells → ETH reserve</p>
+                {preview.sells.map((s, i) => (
+                  <div key={i} className="flex justify-between text-sm rounded px-2.5 py-1.5" style={{ background: 'rgba(5,25,14,0.5)', border: '1px solid rgba(212,175,55,0.08)' }}>
+                    <span style={{ color: 'rgba(255,255,255,0.65)' }}>{tokenLabel(s.token)}</span>
+                    <span style={{ color: '#f87171' }}>→ ~{parseFloat(formatEther(s.estimatedEth)).toFixed(5)} ETH</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {preview.buys.length > 0 && (
+              <div className="space-y-1">
+                <p className="stat-label">Buys ← ETH reserve</p>
+                {preview.buys.map((b, i) => (
+                  <div key={i} className="flex justify-between text-sm rounded px-2.5 py-1.5" style={{ background: 'rgba(5,25,14,0.5)', border: '1px solid rgba(212,175,55,0.08)' }}>
+                    <span style={{ color: 'rgba(255,255,255,0.65)' }}>{tokenLabel(b.token)}</span>
+                    <span style={{ color: '#34d399' }}>{parseFloat(formatEther(b.amountIn)).toFixed(5)} ETH ({(b.weightBps / 100).toFixed(0)}%)</span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="flex gap-2">
               <button onClick={handleQuote} disabled={quoting} className="btn-outline-gold flex-1">
                 {quoting ? 'Refreshing…' : 'Refresh'}

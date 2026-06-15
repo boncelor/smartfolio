@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi'
 import { CONTRACT_ADDRESS, SMARTFOLIO_ABI } from '../contracts'
 
@@ -31,7 +31,7 @@ interface AssetRow {
   assetType: number
   token: string
   useCustomToken: boolean
-  weightBps: string
+  weightBps: number
   poolFee: string
   swapFee: string
   tickLower: string
@@ -39,7 +39,7 @@ interface AssetRow {
 }
 
 function emptyRow(): AssetRow {
-  return { assetType: 3, token: '', useCustomToken: false, weightBps: '', poolFee: '3000', swapFee: '3000', tickLower: '-887220', tickUpper: '887220' }
+  return { assetType: 0, token: '', useCustomToken: false, weightBps: 0, poolFee: '3000', swapFee: '3000', tickLower: '-887220', tickUpper: '887220' }
 }
 
 export default function PortfolioConfigForm({ tokenId }: Props) {
@@ -58,24 +58,54 @@ export default function PortfolioConfigForm({ tokenId }: Props) {
     functionName: 'smfContract',
   })
 
+  const { data: existingConfig } = useReadContract({
+    address: CONTRACT_ADDRESS,
+    abi: SMARTFOLIO_ABI,
+    functionName: 'getPortfolioConfig',
+    args: [BigInt(tokenId)],
+  })
+
+  // Populate rows from on-chain config when it loads
+  useEffect(() => {
+    if (!existingConfig) return
+    const config = existingConfig as readonly {
+      assetType: number; token: string; weightBps: number
+      poolFee: number; swapFee: number; tickLower: number; tickUpper: number
+    }[]
+    if (config.length === 0) return
+    setRows(config.map(a => ({
+      assetType: a.assetType,
+      token: a.token,
+      useCustomToken: false,
+      weightBps: a.weightBps,
+      poolFee: String(a.poolFee || 3000),
+      swapFee: String(a.swapFee || 3000),
+      tickLower: String(a.tickLower ?? -887220),
+      tickUpper: String(a.tickUpper ?? 887220),
+    })))
+  }, [existingConfig])
+
   const isOwner = isConnected && address?.toLowerCase() === (ownerAddr as string | undefined)?.toLowerCase()
 
   const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract()
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash: txHash })
 
-  const totalWeight = rows.reduce((sum, r) => sum + (parseInt(r.weightBps) || 0), 0)
+  const totalWeight = rows.reduce((sum, r) => sum + r.weightBps, 0)
   const weightOk = totalWeight === 10000
 
   const smfWeightBps = rows
     .filter(r => r.assetType === 3)
-    .reduce((sum, r) => sum + (parseInt(r.weightBps) || 0), 0)
+    .reduce((sum, r) => sum + r.weightBps, 0)
   const hasLP    = rows.some(r => r.assetType === 2)
   const hasAAVE  = rows.some(r => r.assetType === 1)
   const smfOk    = smfWeightBps >= 2000
   const lpTierOk = !hasLP   || smfWeightBps >= 4000
   const lvTierOk = !hasAAVE || smfWeightBps >= 6000
 
-  function updateRow(i: number, field: keyof AssetRow, value: string | number) {
+  // Dynamic SMF minimum: 20% base, 40% with LP, 60% with AAVE
+  const smfMinBps = hasAAVE ? 6000 : hasLP ? 4000 : 2000
+
+  function updateRow(i: number, field: keyof AssetRow, value: string | number | boolean) {
     setRows(prev => {
       const next = [...prev]
       next[i] = { ...next[i], [field]: value }
@@ -97,7 +127,7 @@ export default function PortfolioConfigForm({ tokenId }: Props) {
       token:     (r.assetType === 3
         ? (smfAddr as string) || r.token
         : r.token || '0x0000000000000000000000000000000000000000') as `0x${string}`,
-      weightBps: parseInt(r.weightBps) || 0,
+      weightBps: r.weightBps,
       poolFee:   parseInt(r.poolFee) || 0,
       swapFee:   parseInt(r.swapFee) || 0,
       tickLower: parseInt(r.tickLower) || 0,
@@ -134,7 +164,7 @@ export default function PortfolioConfigForm({ tokenId }: Props) {
               <span className="text-xs font-semibold" style={{ color: 'rgba(212,175,55,0.6)' }}>
                 Slot {i + 1}
               </span>
-              {rows.length > 1 && (
+              {row.assetType !== 3 && (
                 <button
                   onClick={() => removeRow(i)}
                   className="text-xs px-2 py-0.5 rounded"
@@ -145,32 +175,45 @@ export default function PortfolioConfigForm({ tokenId }: Props) {
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              {/* Asset type */}
-              <div className="space-y-1">
-                <label className="stat-label">Type</label>
-                <select
-                  value={row.assetType}
-                  onChange={e => updateRow(i, 'assetType', parseInt(e.target.value))}
-                  className="select-money"
-                >
-                  {ASSET_TYPES.map(t => (
-                    <option key={t.value} value={t.value}>{t.label}</option>
-                  ))}
-                </select>
-              </div>
+            {/* Asset type */}
+            <div className="space-y-1">
+              <label className="stat-label">Type</label>
+              <select
+                value={row.assetType}
+                onChange={e => updateRow(i, 'assetType', parseInt(e.target.value))}
+                disabled={row.assetType === 3}
+                className="select-money"
+                style={row.assetType === 3 ? { opacity: 0.6, cursor: 'not-allowed' } : undefined}
+              >
+                {ASSET_TYPES.filter(t => row.assetType === 3 || t.value !== 3).map(t => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </div>
 
-              {/* Weight */}
-              <div className="space-y-1">
-                <label className="stat-label">Weight (bps)</label>
-                <input
-                  type="number" min={1} max={10000}
-                  value={row.weightBps}
-                  onChange={e => updateRow(i, 'weightBps', e.target.value)}
-                  placeholder="2000 = 20%"
-                  className="input-money"
-                />
+            {/* Weight slider */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="stat-label" style={{ marginBottom: 0 }}>Weight</label>
+                <span className="text-sm font-bold" style={{ color: row.weightBps > 0 ? 'rgba(212,175,55,0.9)' : 'rgba(212,175,55,0.35)' }}>
+                  {(row.weightBps / 100).toFixed(0)}%
+                </span>
               </div>
+              <input
+                type="range"
+                min={row.assetType === 3 ? smfMinBps : 0}
+                max={10000}
+                step={500}
+                value={row.weightBps}
+                onChange={e => {
+                  const next = parseInt(e.target.value)
+                  const minVal = row.assetType === 3 ? smfMinBps : 0
+                  const available = row.weightBps + (10000 - totalWeight)
+                  updateRow(i, 'weightBps', Math.max(minVal, Math.min(next, available)))
+                }}
+                className="w-full"
+                style={{ accentColor: '#d4af37' }}
+              />
             </div>
 
             {/* Token address — not needed for AAVE or ETH */}

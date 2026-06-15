@@ -177,24 +177,11 @@ function buildSvg(ctx: RenderContext): string {
       <stop offset="0%"   stop-color="${C.bg0}"/>
       <stop offset="100%" stop-color="${C.bg1}"/>
     </linearGradient>
-    <!-- Copper surface texture -->
-    <filter id="grain" x="0%" y="0%" width="100%" height="100%">
-      <feTurbulence type="fractalNoise" baseFrequency="0.45 0.3" numOctaves="4"
-        seed="7" stitchTiles="stitch" result="noise"/>
-      <feColorMatrix type="matrix"
-        values="0.2  0 0 0 0.08
-                0.08 0 0 0 0.03
-                0    0 0 0 0.01
-                0    0 0 6 -2" in="noise" result="tinted"/>
-      <feBlend in="SourceGraphic" in2="tinted" mode="multiply"/>
-    </filter>
     ${barGradDefs}
   </defs>
 
   <!-- Background -->
   <rect width="${W}" height="${totalH}" fill="url(#bg)" rx="24"/>
-  <rect width="${W}" height="${totalH}" rx="24" fill="white" fill-opacity="0.001" filter="url(#grain)"/>
-
   <!-- Patina blobs -->
   ${patinaBlobs}
 

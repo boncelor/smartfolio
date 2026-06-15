@@ -292,7 +292,20 @@ No swaps, no bonding curve interaction, no fee. The holder receives their pro-ra
 
 ### 4.10 Rebalancing
 
-The keeper submits `RebalanceInstruction[]` — a set of sell/buy pairs computed off-chain against the ERC20 slice holdings. The contract executes each swap against Uniswap V3. Slippage tolerance is enforced globally via `slippageToleranceBps`. AAVE and LP slices are not rebalanced — their positions change only via `deploy` and `divest`.
+Two rebalance entry points exist:
+
+**`rebalance(id, RebalanceInstruction[])`** — legacy ERC20-only rebalance. Sells and buys ERC20 token positions via Uniswap V3, routing WETH between operations inside the same call. AAVE, LP, SMF, and ETH slices are not touched.
+
+**`rebalanceAll(id, RebalanceAllInstruction[])`** — full portfolio rebalance. All settlement flows through `reserve[id]` as the intermediate currency. The intended execution order is:
+
+1. **Sell overweight SMF** — calls `SMFToken.sellSMF(wholeTokens, minEthOut)` on the SMF bonding curve. ETH received is credited to `reserve[id]`.
+2. **Sell overweight ERC20s** — swaps each token → WETH via Uniswap V3, unwraps WETH → ETH, credits ETH to `reserve[id]`.
+3. **Buy underweight ERC20s** — for each buy instruction, draws ETH from `reserve[id]`, wraps to WETH, swaps WETH → token via Uniswap V3.
+4. **Buy underweight SMF (last)** — draws ETH from `reserve[id]`, calls `SMFToken.buySMF{value}(minSMF)` on the bonding curve. SMF received is credited to `portfolioSMFHoldings[id]`.
+
+Instructions are submitted in this order by the off-chain builder. The contract processes them sequentially without enforcing the order — the caller is responsible for sequencing. SMF instructions are identified by `token == smfContract`. For SMF sells, `amountIn` is the SMF amount in wei (18-decimal units matching `portfolioSMFHoldings`); the contract converts to whole tokens internally before calling the bonding curve. For SMF buys, `amountIn` is the ETH amount in wei to spend.
+
+AAVE and LP slices are not rebalanced — their positions change only via `deploy` and `divest`.
 
 ---
 

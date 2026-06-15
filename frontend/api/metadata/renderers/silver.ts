@@ -141,17 +141,6 @@ function buildSvg(ctx: RenderContext): string {
       <stop offset="0%"   stop-color="${SV.bg0}"/>
       <stop offset="100%" stop-color="${SV.bg1}"/>
     </linearGradient>
-    <!-- Brushed metal texture -->
-    <filter id="grain" x="0%" y="0%" width="100%" height="100%">
-      <feTurbulence type="fractalNoise" baseFrequency="0.8 0.03" numOctaves="4"
-        seed="11" stitchTiles="stitch" result="noise"/>
-      <feColorMatrix type="matrix"
-        values="0.06 0 0 0 0.04
-                0.06 0 0 0 0.05
-                0.07 0 0 0 0.06
-                0    0 0 5 -2" in="noise" result="tinted"/>
-      <feBlend in="SourceGraphic" in2="tinted" mode="screen"/>
-    </filter>
     <!-- Mirror reflection gradient -->
     <linearGradient id="reflect" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%"   stop-color="${SV.accentBright}" stop-opacity="0"/>
@@ -165,8 +154,6 @@ function buildSvg(ctx: RenderContext): string {
 
   <!-- Background -->
   <rect width="${W}" height="${totalH}" fill="url(#bg)" rx="24"/>
-  <rect width="${W}" height="${totalH}" rx="24" fill="white" fill-opacity="0.001" filter="url(#grain)"/>
-
   <!-- Brushed lines -->
   <g clip-path="url(#card-clip)">
     ${brushLines}

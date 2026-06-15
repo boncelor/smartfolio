@@ -154,6 +154,13 @@ contract Smartfolio is
         _delegateTo(marketFacet);
     }
 
+    function rebalanceAll(uint256 id, RebalanceAllInstruction[] calldata instructions)
+        external nonReentrant whenNotPaused
+    {
+        if (msg.sender != keeper && balanceOf(msg.sender, id) == 0) revert NotAuthorized();
+        _delegateTo(marketFacet);
+    }
+
     function divest(uint256 id, uint256 amount)
         external nonReentrant whenNotPaused
     {

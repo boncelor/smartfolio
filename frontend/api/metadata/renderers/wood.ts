@@ -138,17 +138,6 @@ function buildSvg(ctx: RenderContext): string {
       <stop offset="0%"   stop-color="${W_.bg0}"/>
       <stop offset="100%" stop-color="${W_.bg1}"/>
     </linearGradient>
-    <!-- Wood grain texture -->
-    <filter id="grain" x="0%" y="0%" width="100%" height="100%">
-      <feTurbulence type="fractalNoise" baseFrequency="0.02 0.6" numOctaves="5"
-        seed="3" stitchTiles="stitch" result="noise"/>
-      <feColorMatrix type="matrix"
-        values="0.15 0 0 0 0.1
-                0.08 0 0 0 0.04
-                0    0 0 0 0.01
-                0    0 0 8 -3" in="noise" result="tinted"/>
-      <feBlend in="SourceGraphic" in2="tinted" mode="multiply"/>
-    </filter>
     <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%"   stop-color="${W_.accentWarm}" stop-opacity="0.06"/>
       <stop offset="50%"  stop-color="${W_.accentWarm}" stop-opacity="0.02"/>
@@ -158,7 +147,6 @@ function buildSvg(ctx: RenderContext): string {
 
   <!-- Background -->
   <rect width="${W}" height="${totalH}" fill="url(#bg)" rx="24"/>
-  <rect width="${W}" height="${totalH}" rx="24" fill="white" fill-opacity="0.001" filter="url(#grain)"/>
   <!-- Warm sheen -->
   <rect width="${W}" height="${totalH}" rx="24" fill="url(#sheen)"/>
 

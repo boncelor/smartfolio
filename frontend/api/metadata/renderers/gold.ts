@@ -135,17 +135,6 @@ function buildSvg(ctx: RenderContext): string {
       <stop offset="40%"  stop-color="${G.accent}" stop-opacity="0.03"/>
       <stop offset="100%" stop-color="${G.accent}" stop-opacity="0.05"/>
     </linearGradient>
-    <!-- Gold texture filter -->
-    <filter id="grain" x="0%" y="0%" width="100%" height="100%">
-      <feTurbulence type="fractalNoise" baseFrequency="0.35 0.2" numOctaves="4"
-        seed="5" stitchTiles="stitch" result="noise"/>
-      <feColorMatrix type="matrix"
-        values="0.25 0 0 0 0.12
-                0.15 0 0 0 0.07
-                0    0 0 0 0
-                0    0 0 7 -3" in="noise" result="tinted"/>
-      <feBlend in="SourceGraphic" in2="tinted" mode="multiply"/>
-    </filter>
     <clipPath id="card-clip">
       <rect width="${W}" height="${totalH}" rx="24"/>
     </clipPath>
@@ -153,7 +142,6 @@ function buildSvg(ctx: RenderContext): string {
 
   <!-- Background -->
   <rect width="${W}" height="${totalH}" fill="url(#bg)" rx="24"/>
-  <rect width="${W}" height="${totalH}" rx="24" fill="white" fill-opacity="0.001" filter="url(#grain)"/>
   <!-- Gold wash -->
   <rect width="${W}" height="${totalH}" rx="24" fill="url(#wash)"/>
 

@@ -404,6 +404,28 @@ export const SMARTFOLIO_ABI = [
     outputs: [],
   },
   {
+    name: 'rebalanceAll',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'id', type: 'uint256' },
+      {
+        name: 'instructions',
+        type: 'tuple[]',
+        components: [
+          { name: 'token', type: 'address' },
+          { name: 'isSell', type: 'bool' },
+          { name: 'amountIn', type: 'uint256' },
+          { name: 'amountOutMin', type: 'uint256' },
+          { name: 'poolFee', type: 'uint24' },
+          { name: 'swapPath', type: 'bytes' },
+          { name: 'sellSwapPath', type: 'bytes' },
+        ],
+      },
+    ],
+    outputs: [],
+  },
+  {
     name: 'getPortfolioConfig',
     type: 'function',
     stateMutability: 'view',
