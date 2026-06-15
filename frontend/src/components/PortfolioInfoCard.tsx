@@ -403,7 +403,20 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
         </div>
       </div>
 
-      {/* Key stats */}
+      {/* SMF holdings — first */}
+      {smfHoldings !== undefined && smfHoldings > 0n && (
+        <div className="space-y-1.5">
+          <p className="stat-label">SMF in Portfolio</p>
+          <div
+            className="rounded px-2.5 py-1.5 flex items-center justify-between text-sm"
+            style={{ background: 'rgba(5,25,14,0.7)', border: '1px solid rgba(212,175,55,0.12)' }}
+          >
+            <span className="font-semibold text-white">{parseFloat(formatEther(smfHoldings)).toLocaleString(undefined, { maximumFractionDigits: 4 })} SMF</span>
+          </div>
+        </div>
+      )}
+
+      {/* ETH reserve — second */}
       <div className="grid grid-cols-2 gap-3">
         <div>
           <p className="stat-label">Reserve</p>
@@ -419,42 +432,10 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
         </div>
       </div>
 
-
-      {/* Tier info */}
-      {tierInfo !== undefined && smfWeightBps !== undefined && (
-        <div
-          className="rounded-lg px-3 py-2 flex items-center justify-between text-sm"
-          style={{ background: 'rgba(212,175,55,0.07)', border: '1px solid rgba(212,175,55,0.15)' }}
-        >
-          <span className="stat-label" style={{ marginBottom: 0 }}>Tier</span>
-          <span style={{ color: '#d4af37', fontWeight: 600 }}>
-            {tier !== undefined ? TIER_LABELS[tier] ?? `Tier ${tier}` : '—'}
-            {smfWeightBps !== undefined && (
-              <span className="ml-2 font-normal" style={{ color: 'rgba(212,175,55,0.6)', fontSize: '0.75rem' }}>
-                ({(Number(smfWeightBps) / 100).toFixed(0)}% SMF)
-              </span>
-            )}
-          </span>
-        </div>
-      )}
-
-      {/* SMF holdings */}
-      {smfHoldings !== undefined && smfHoldings > 0n && (
-        <div className="space-y-1.5">
-          <p className="stat-label">SMF in Portfolio</p>
-          <div
-            className="rounded px-2.5 py-1.5 flex items-center justify-between text-sm"
-            style={{ background: 'rgba(5,25,14,0.7)', border: '1px solid rgba(212,175,55,0.12)' }}
-          >
-            <span className="font-semibold text-white">{parseFloat(formatEther(smfHoldings)).toLocaleString(undefined, { maximumFractionDigits: 4 })} SMF</span>
-          </div>
-        </div>
-      )}
-
-      {/* Holdings */}
+      {/* AAVE holdings */}
       {aaveWeth !== undefined && aaveWeth > 0n && (
         <div className="space-y-1.5">
-          <p className="stat-label">Holdings</p>
+          <p className="stat-label">AAVE</p>
           <div className="grid grid-cols-2 gap-2 text-sm">
             <div
               className="rounded px-2.5 py-1.5"
