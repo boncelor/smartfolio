@@ -13,6 +13,7 @@ interface IPortfolioAavePool {
 interface ISMFToken {
     function buySMF(uint256 amount) external payable;
     function sellSMF(uint256 amount, uint256 minEthOut) external;
+    function sellSMFForRebalance(uint256 amount, uint256 minEthOut) external;
     function smfAmountForBuy(uint256 ethAmount) external view returns (uint256);
     function balanceOf(address account) external view returns (uint256);
     function transfer(address to, uint256 amount) external returns (bool);
@@ -259,7 +260,7 @@ contract SmartfolioMarket is SmartfolioBase, ERC1155Upgradeable {
                     if (portfolioSMFHoldings[id] < smfTokens * WAD) revert InsufficientHoldings();
 
                     uint256 ethBefore = address(this).balance;
-                    ISMFToken(smfContract).sellSMF(smfTokens, inst.amountOutMin);
+                    ISMFToken(smfContract).sellSMFForRebalance(smfTokens, inst.amountOutMin);
                     uint256 ethReceived = address(this).balance - ethBefore;
 
                     portfolioSMFHoldings[id] -= smfTokens * WAD;

@@ -431,13 +431,18 @@ All three revert with `CallerNotSMFContract` if called by any other address. The
 | `smfMintCost(amount)` | ETH cost to buy `amount` SMF (whole tokens) |
 | `smfAmountForBuy(ethAmount)` | Whole SMF tokens purchasable with `ethAmount` wei — inverse buy curve |
 | `smfBurnValue(amount)` | Net ETH received from selling `amount` SMF (after quadratic fee) |
+| `smfBurnValueForRebalance(amount)` | Net ETH received from selling `amount` SMF via the NFT rebalance path (flat `nftSellFeeRate` fee) |
 | `smfForNFT()` | `smfRequired` — simulate `mintNFT` cost from current on-chain state |
 | `smfForReserve(ethAmount)` | `smfRequired` — simulate `addETHToNFT` cost |
 | `getTiers()` | Current SMF tier configuration |
 
 ### 5.7 SMF Sell Fee
 
-`sellSMF` applies a quadratic fee based on the seller's share of `smfTotalSupply`:
+There are two sell paths with different fee structures:
+
+**Direct sell — quadratic fee (`sellSMF`)**
+
+Callable by any holder. Fee scales quadratically with the seller's share of `smfTotalSupply`, penalising large exits that move the bonding curve significantly:
 
 ```
 proportion = amount / smfTotalSupply
@@ -446,7 +451,18 @@ fee        = gross × feeRate
 net        = gross − fee
 ```
 
-`maxSmfSellFeeRate` is an admin-configurable parameter (WAD-scaled). At the default of 0.8e18 (80%), a seller redeeming 100% of supply pays 80% fee; one redeeming 10% pays 0.8%; one redeeming 1% pays 0.008%. The fee stays in the bonding curve pool (benefiting remaining holders) unless a treasury is configured, in which case it is forwarded there. `smfBurnValue(amount)` returns the net amount after fee.
+`maxSmfSellFeeRate` is admin-configurable (WAD-scaled, default 0.8e18 = 80%). A seller redeeming 10% of supply pays 0.8% fee; 1% of supply pays 0.008%. The fee stays in the bonding curve pool (benefiting remaining holders) unless a treasury is configured, in which case it is forwarded there. `smfBurnValue(amount)` returns the net amount after fee.
+
+**NFT rebalance sell — flat fee (`sellSMFForRebalance`)**
+
+Callable only by the registered Smartfolio proxy (enforced by `CallerNotSmartfolio`). Used exclusively by `rebalanceAll` when an NFT portfolio rebalances an overweight SMF position. Applies a flat `nftSellFeeRate` (WAD-scaled, default 0.05e18 = 5%) regardless of how many tokens are sold:
+
+```
+fee = gross × nftSellFeeRate
+net = gross − fee
+```
+
+`nftSellFeeRate` is admin-configurable via `setNftSellFeeRate`. `smfBurnValueForRebalance(amount)` returns the net amount after the flat fee and is used by the frontend to quote rebalance operations.
 
 ---
 

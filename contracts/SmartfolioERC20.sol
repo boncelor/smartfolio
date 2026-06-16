@@ -57,6 +57,7 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     error StalePrice();
     error InvalidPrice();
     error InvalidFeeRate();
+    error CallerNotSmartfolio();
 
     // -------------------------------------------------------------------------
     // Events
@@ -94,6 +95,7 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     uint256 public priceMaxAge = 30 minutes;   // staleness threshold
 
     uint256 public maxSmfSellFeeRate = 0.8e18; // WAD-scaled; 0.8e18 = 80% max fee
+    uint256 public nftSellFeeRate = 0.05e18;   // WAD-scaled; flat fee for rebalance sells via NFT
 
     // NFT minting cost parameters
     uint256 public nftCount;                  // total NFTs ever minted
@@ -141,6 +143,11 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
     function setMaxSmfSellFeeRate(uint256 rate) external onlyOwner {
         if (rate > 1e18) revert InvalidFeeRate();
         maxSmfSellFeeRate = rate;
+    }
+
+    function setNftSellFeeRate(uint256 rate) external onlyOwner {
+        if (rate > 1e18) revert InvalidFeeRate();
+        nftSellFeeRate = rate;
     }
 
     function setSmartfolio(address _smartfolio) external onlyOwner {
@@ -229,6 +236,52 @@ contract SmartfolioERC20 is ERC20, Ownable, ReentrancyGuard {
             if (!feeOk) revert ETHTransferFailed();
         }
         // If no treasury, fee stays in the pool (benefits remaining holders)
+    }
+
+    // -------------------------------------------------------------------------
+    // Smartfolio proxy — sell SMF for NFT rebalance (flat fee)
+    // -------------------------------------------------------------------------
+
+    /**
+     * @notice Sell `amount` SMF tokens during an NFT rebalance. Flat fee path —
+     *         applies `nftSellFeeRate` instead of the quadratic fee. Only callable
+     *         by the registered Smartfolio proxy.
+     * @param amount     Number of SMF tokens to sell (whole tokens, not wei).
+     * @param minEthOut  Slippage guard — reverts if net ETH received is below this.
+     */
+    function sellSMFForRebalance(uint256 amount, uint256 minEthOut) external nonReentrant {
+        if (msg.sender != smartfolio) revert CallerNotSmartfolio();
+        if (amount == 0) revert AmountZero();
+        if (balanceOf(msg.sender) < amount * 10**18) revert InsufficientSMFBalance();
+
+        uint256 gross = _ethForSmfAmount(amount);
+        uint256 fee   = gross * nftSellFeeRate / 1e18;
+        uint256 net   = gross - fee;
+        if (net < minEthOut) revert SlippageExceeded();
+        if (address(this).balance < gross) revert InsufficientETH();
+
+        smfTotalSupply -= amount;
+        _burn(msg.sender, amount * 10**18);
+
+        emit SMFBurned(msg.sender, amount, net);
+
+        (bool ok, ) = msg.sender.call{value: net}("");
+        if (!ok) revert ETHTransferFailed();
+
+        if (fee > 0 && treasury != address(0)) {
+            (bool feeOk, ) = treasury.call{value: fee}("");
+            if (!feeOk) revert ETHTransferFailed();
+        }
+    }
+
+    /**
+     * @notice Simulate the ETH received from selling `amount` SMF via the NFT
+     *         rebalance path (flat `nftSellFeeRate` fee).
+     */
+    function smfBurnValueForRebalance(uint256 amount) public view returns (uint256 ethOut) {
+        uint256 gross = _ethForSmfAmount(amount);
+        uint256 fee   = gross * nftSellFeeRate / 1e18;
+        ethOut = gross - fee;
     }
 
     // -------------------------------------------------------------------------

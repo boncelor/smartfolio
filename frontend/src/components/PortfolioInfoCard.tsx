@@ -164,12 +164,12 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
       )
       const holdings: Record<string, bigint> = Object.fromEntries(holdingResults)
 
-      // SMF burn value query via bonding curve
+      // SMF burn value query — use flat-fee path for rebalance quotes
       const smfBurnValueFn = async (wholeTokens: bigint): Promise<bigint> => {
         return publicClient.readContract({
           address: SMF_ADDRESS,
           abi: SMF_ABI,
-          functionName: 'smfBurnValue',
+          functionName: 'smfBurnValueForRebalance',
           args: [wholeTokens],
         }) as Promise<bigint>
       }

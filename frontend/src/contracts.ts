@@ -166,6 +166,13 @@ export const SMF_ABI = [
     outputs: [{ name: 'ethOut', type: 'uint256' }],
   },
   {
+    name: 'smfBurnValueForRebalance',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: [{ name: 'ethOut', type: 'uint256' }],
+  },
+  {
     name: 'sellSMF',
     type: 'function',
     stateMutability: 'nonpayable',
