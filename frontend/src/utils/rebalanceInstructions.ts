@@ -125,8 +125,6 @@ export async function buildRebalanceAllInstructions(
     }
   }
 
-  // Total rebalanceable ETH value (excludes AAVE, LP, ETH-slice which aren't touched)
-  const rebalanceableAssetBps = (smfAsset?.weightBps ?? 0) + erc20Assets.reduce((s, a) => s + a.weightBps, 0)
   const totalEthValue = smfEthValue + Object.values(erc20EthValues).reduce((s, v) => s + v, 0n) + ethReserve
 
   if (totalEthValue === 0n) {
@@ -223,11 +221,6 @@ export async function buildRebalanceAllInstructions(
 
   const totalEthIn = sells.reduce((s, e) => s + e.estimatedEth, 0n) + ethReserve
 
-  if (totalEthIn === 0n && !erc20Targets.some(e => e.currentEth < e.targetEth) && !(smfAsset && smfEthValue < smfTargetEth)) {
-    return { instructions: [], sells: [], buys: [], totalEthIn: 0n,
-      error: 'Portfolio is already balanced — no rebalancing needed.' }
-  }
-
   // ---- Step 4: build buy instructions (ERC20 first, SMF last) ----
 
   let ethAvailable = totalEthIn
@@ -281,6 +274,11 @@ export async function buildRebalanceAllInstructions(
       swapPath:     '0x',
       sellSwapPath: '0x',
     })
+  }
+
+  if (instructions.length === 0) {
+    return { instructions: [], sells: [], buys: [], totalEthIn: 0n,
+      error: 'Portfolio is already balanced — no rebalancing needed.' }
   }
 
   return { instructions, sells, buys, totalEthIn, error: null }

@@ -91,23 +91,14 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
   )
   const hasReserve   = reserve !== undefined && reserve > 0n
   const hasErc20     = config !== undefined && config.some(a => a.assetType === 0)
-  const hasEthSlice  = config !== undefined && config.some(a => a.assetType === 5)
-  const ethSliceUnfunded = isHolder && hasEthSlice && !hasReserve
+  // Config has assets that actually need ETH deployed into them (non-ETH-slice types)
+  const hasDeployableAssets = config !== undefined && config.some(a => a.assetType !== 5)
 
-  // Rebalance is needed when:
-  // 1. ETH is sitting in reserve and the config has assets to deploy into (deploy needed)
-  // 2. At least one configured ERC20 has holdings while another has zero (ERC20 drift)
-  const erc20HasAnyHoldings = erc20Assets.some(
-    a => (erc20Holdings[a.token.toLowerCase()] ?? 0n) > 0n
-  )
-  const erc20HasAnyZeroHoldings = erc20Assets.some(
-    a => (erc20Holdings[a.token.toLowerCase()] ?? 0n) === 0n
-  )
-  const hasErc20Drift = hasErc20 && erc20HasAnyHoldings && erc20HasAnyZeroHoldings
-  const needsDeploy = isHolder && hasReserve && config !== undefined && config.length > 0
-  // Show rebalance whenever the holder has ERC20 assets (to allow weight adjustments),
-  // has reserve to deploy, or has an unfunded ETH slice in config
-  const needsRebalance = isHolder && (hasErc20 || needsDeploy || ethSliceUnfunded)
+  // "Deploy Reserve" is only meaningful when there's reserve ETH AND assets to deploy into.
+  // If the config only has an ETH slice, the reserve is where it's supposed to be — no deploy needed.
+  const needsDeploy = isHolder && hasReserve && hasDeployableAssets
+  // Show rebalance whenever the holder has ERC20 assets (to allow weight adjustments) or has reserve to deploy
+  const needsRebalance = isHolder && (hasErc20 || needsDeploy)
 
   // Rebalance write
   const { writeContract: writeRebalance, data: rebalanceHash, isPending: rebalancePending, error: rebalanceError, reset: resetRebalance } = useWriteContract()
