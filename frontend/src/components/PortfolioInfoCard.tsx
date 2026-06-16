@@ -9,8 +9,6 @@ interface Props {
   tokenId: number
 }
 
-const ASSET_TYPE_LABELS = ['ERC20', 'AAVE', 'LP', 'SMF', 'STAKING', 'ETH']
-const TIER_LABELS = ['Base (≥20% SMF)', 'LP (≥40% SMF)', 'Leverage (≥60% SMF)']
 
 // Sepolia WETH
 const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14'
@@ -438,123 +436,89 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
         </div>
       </div>
 
-      {/* SMF holdings — first */}
-      {smfHoldings !== undefined && smfHoldings > 0n && (
-        <div className="space-y-1.5">
-          <p className="stat-label">SMF in Portfolio</p>
-          <div
-            className="rounded px-2.5 py-1.5 flex items-center justify-between text-sm"
-            style={{ background: 'rgba(5,25,14,0.7)', border: '1px solid rgba(212,175,55,0.12)' }}
-          >
-            <span className="font-semibold text-white">{parseFloat(formatEther(smfHoldings)).toLocaleString(undefined, { maximumFractionDigits: 4 })} SMF</span>
-          </div>
-        </div>
-      )}
+      {/* Unified positions list: SMF, ERC20s, ETH reserve in config order */}
+      {(() => {
+        type Row = { key: string; name: string; balance: string; weight: number | null }
+        const rows: Row[] = []
+        const configArr = config ?? []
+        let smfInConfig = false
+        let ethInConfig = false
 
-      {/* ETH reserve — second */}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <p className="stat-label">Reserve</p>
-          <p className="text-sm font-semibold text-white">
-            {reserve !== undefined ? `${formatEther(reserve)} ETH` : '—'}
-          </p>
-        </div>
-        <div>
-          <p className="stat-label">Supply</p>
-          <p className="text-sm font-semibold text-white">
-            {totalSupply !== undefined ? totalSupply.toString() : '—'}
-          </p>
-        </div>
-      </div>
+        for (const asset of configArr) {
+          if (asset.assetType === 3) {
+            smfInConfig = true
+            const bal = smfHoldings !== undefined && smfHoldings > 0n
+              ? parseFloat(formatEther(smfHoldings)).toLocaleString(undefined, { maximumFractionDigits: 4 }) + ' SMF'
+              : '0 SMF'
+            rows.push({ key: 'smf', name: 'SMF', balance: bal, weight: asset.weightBps / 100 })
+          } else if (asset.assetType === 5) {
+            ethInConfig = true
+            const bal = reserve !== undefined && reserve > 0n
+              ? parseFloat(formatEther(reserve)).toFixed(6) + ' ETH'
+              : '0 ETH'
+            rows.push({ key: 'eth', name: 'ETH', balance: bal, weight: asset.weightBps / 100 })
+          } else if (asset.assetType === 0) {
+            const holding = erc20Holdings[asset.token.toLowerCase()] ?? 0n
+            const symbol = erc20Symbols[asset.token.toLowerCase()] ?? asset.token.slice(0, 8) + '…'
+            const bal = holding > 0n
+              ? parseFloat(formatEther(holding)).toLocaleString(undefined, { maximumFractionDigits: 4 }) + ' ' + symbol
+              : '0 ' + symbol
+            rows.push({ key: asset.token, name: symbol, balance: bal, weight: asset.weightBps / 100 })
+          }
+          // AAVE (1) and LP (2) shown separately below
+        }
 
-      {/* AAVE holdings */}
-      {aaveWeth !== undefined && aaveWeth > 0n && (
-        <div className="space-y-1.5">
-          <p className="stat-label">AAVE</p>
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <div
-              className="rounded px-2.5 py-1.5"
-              style={{ background: 'rgba(5,25,14,0.7)', border: '1px solid rgba(212,175,55,0.12)' }}
-            >
-              <p className="stat-label" style={{ fontSize: '0.65rem' }}>AAVE WETH</p>
-              <p className="font-semibold text-white">{formatEther(aaveWeth)} ETH</p>
-            </div>
-          </div>
-        </div>
-      )}
+        // SMF not in config but has holdings (e.g. mintWithSMF)
+        if (!smfInConfig && smfHoldings !== undefined && smfHoldings > 0n) {
+          const bal = parseFloat(formatEther(smfHoldings)).toLocaleString(undefined, { maximumFractionDigits: 4 }) + ' SMF'
+          rows.unshift({ key: 'smf', name: 'SMF', balance: bal, weight: null })
+        }
 
-      {/* Asset config table */}
-      {config !== undefined && config.length > 0 && (
-        <div className="space-y-1.5">
-          <p className="stat-label">Asset Allocation</p>
+        // ETH reserve not in config but reserve > 0
+        if (!ethInConfig && reserve !== undefined && reserve > 0n) {
+          const bal = parseFloat(formatEther(reserve)).toFixed(6) + ' ETH'
+          rows.push({ key: 'eth', name: 'ETH', balance: bal, weight: null })
+        }
+
+        if (rows.length === 0 && config !== undefined && config.length === 0) {
+          return (
+            <p className="text-sm" style={{ color: 'rgba(255,255,255,0.3)' }}>
+              No portfolio configured for this token ID.
+            </p>
+          )
+        }
+
+        return (
           <div className="space-y-1">
-            {config.map((asset, i) => {
-              const holding = asset.assetType === 0
-                ? erc20Holdings[asset.token.toLowerCase()]
-                : asset.assetType === 5
-                ? reserve  // ETH slice lives in reserve
-                : undefined
-              return (
-                <div
-                  key={i}
-                  className="rounded px-2.5 py-1.5 text-sm"
-                  style={{
-                    background: 'rgba(5,25,14,0.5)',
-                    border: needsRebalance && asset.assetType === 0 && (erc20Holdings[asset.token.toLowerCase()] ?? 0n) === 0n
-                      ? '1px solid rgba(245,158,11,0.4)'
-                      : '1px solid rgba(212,175,55,0.08)',
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="text-xs font-bold px-1.5 py-0.5 rounded"
-                        style={
-                          asset.assetType === 3
-                            ? { background: 'rgba(212,175,55,0.15)', color: '#d4af37' }
-                            : { background: 'rgba(52,211,153,0.1)', color: '#34d399' }
-                        }
-                      >
-                        {ASSET_TYPE_LABELS[asset.assetType] ?? `Type ${asset.assetType}`}
-                      </span>
-                      <span
-                        className="text-xs truncate"
-                        style={{ color: 'rgba(255,255,255,0.65)', maxWidth: '9rem' }}
-                      >
-                        {asset.assetType === 0
-                          ? erc20Symbols[asset.token.toLowerCase()] ?? asset.token
-                          : asset.assetType === 1
-                          ? 'WETH (Aave)'
-                          : asset.assetType === 3
-                          ? 'SMF'
-                          : asset.assetType === 5
-                          ? 'ETH'
-                          : asset.token}
-                      </span>
-                    </div>
-                    <span className="font-bold" style={{ color: '#d4af37' }}>
-                      {(asset.weightBps / 100).toFixed(0)}%
-                    </span>
-                  </div>
-                  {holding !== undefined && holding > 0n && (
-                    <div className="mt-1 text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
-                      {asset.assetType === 5 ? 'Reserve: ' : 'Balance: '}
-                      <span style={{ color: 'rgba(255,255,255,0.65)' }}>
-                        {formatEther(holding)}{asset.assetType === 5 ? ' ETH' : ''}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+            {rows.map(row => (
+              <div
+                key={row.key}
+                className="flex items-center gap-2 text-sm rounded px-2.5 py-1.5"
+                style={{ background: 'rgba(5,25,14,0.5)', border: '1px solid rgba(212,175,55,0.08)' }}
+              >
+                <span className="flex-1" style={{ color: 'rgba(255,255,255,0.5)' }}>{row.name}</span>
+                <span className="font-semibold text-white">{row.balance}</span>
+                <span className="w-8 text-right font-bold tabular-nums" style={{ color: '#d4af37' }}>
+                  {row.weight !== null ? `${row.weight.toFixed(0)}%` : '—'}
+                </span>
+              </div>
+            ))}
+          </div>
+        )
+      })()}
+
+      {/* AAVE — separate (position is held in Aave protocol, not a simple balance) */}
+      {aaveWeth !== undefined && aaveWeth > 0n && (
+        <div className="space-y-1">
+          <p className="stat-label">AAVE</p>
+          <div
+            className="rounded px-2.5 py-1.5 text-sm"
+            style={{ background: 'rgba(5,25,14,0.5)', border: '1px solid rgba(212,175,55,0.08)' }}
+          >
+            <span style={{ color: 'rgba(255,255,255,0.5)' }}>WETH (Aave)</span>
+            <span className="float-right font-semibold text-white">{parseFloat(formatEther(aaveWeth)).toFixed(6)} ETH</span>
           </div>
         </div>
-      )}
-
-      {config !== undefined && config.length === 0 && (
-        <p className="text-sm" style={{ color: 'rgba(255,255,255,0.3)' }}>
-          No portfolio configured for this token ID.
-        </p>
       )}
     </div>
   )
