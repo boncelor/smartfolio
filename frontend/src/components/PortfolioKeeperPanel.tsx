@@ -70,7 +70,6 @@ export default function PortfolioKeeperPanel({ tokenId }: Props) {
       abi: SMARTFOLIO_ABI,
       functionName: 'deploy',
       args: [BigInt(tokenId), mins, 0n, 0n, 0n, 0n],
-      gas: 3_000_000n,
     })
   }
 

@@ -249,7 +249,6 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
                   abi: SMARTFOLIO_ABI,
                   functionName: 'deploy',
                   args: [id, Array(erc20Count).fill(0n), 0n, 0n, 0n, 0n],
-                  gas: 3_000_000n,
                 })
               }}
               disabled={deployPending || deployConfirming}
