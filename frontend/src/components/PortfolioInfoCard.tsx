@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAccount, usePublicClient } from 'wagmi'
+import { useReadContracts, useWriteContract, useSimulateContract, useWaitForTransactionReceipt, useAccount, usePublicClient } from 'wagmi'
 import { formatEther, parseUnits } from 'viem'
 import { CONTRACT_ADDRESS, SMARTFOLIO_ABI, SMF_ADDRESS, SMF_ABI } from '../contracts'
 import PortfolioConfigForm from './PortfolioConfigForm'
@@ -107,6 +107,16 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
   // Deploy reserve write
   const { writeContract: writeDeploy, data: deployHash, isPending: deployPending, error: deployError, reset: resetDeploy } = useWriteContract()
   const { isLoading: deployConfirming, isSuccess: deployConfirmed } = useWaitForTransactionReceipt({ hash: deployHash })
+
+  // Pre-simulate deploy to surface the real revert reason before the user clicks
+  const erc20Count = config?.filter(a => a.assetType === 0).length ?? 0
+  const { error: deploySimError } = useSimulateContract({
+    address: CONTRACT_ADDRESS,
+    abi: SMARTFOLIO_ABI,
+    functionName: 'deploy',
+    args: [id, Array(erc20Count).fill(0n), 0n, 0n, 0n, 0n],
+    query: { enabled: needsDeploy },
+  })
 
   // Top-up write
   const { writeContract: writeAddSMF, data: addSMFHash, isPending: addSMFPending, error: addSMFError, reset: resetAddSMF } = useWriteContract()
@@ -243,7 +253,6 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
               onClick={() => {
                 if (!config || reserve === undefined) return
                 resetDeploy()
-                const erc20Count = config.filter(a => a.assetType === 0).length
                 writeDeploy({
                   address: CONTRACT_ADDRESS,
                   abi: SMARTFOLIO_ABI,
@@ -251,11 +260,16 @@ export default function PortfolioInfoCard({ tokenId }: Props) {
                   args: [id, Array(erc20Count).fill(0n), 0n, 0n, 0n, 0n],
                 })
               }}
-              disabled={deployPending || deployConfirming}
+              disabled={!!deploySimError || deployPending || deployConfirming}
               className="btn-outline-gold w-full"
             >
               {deployPending ? 'Confirm…' : deployConfirming ? 'Deploying…' : 'Deploy Reserve'}
             </button>
+            {deploySimError && (
+              <p className="text-sm break-all" style={{ color: '#f87171' }}>
+                Cannot deploy: {deploySimError.message.split('\n')[0]}
+              </p>
+            )}
             {deployConfirmed && <p className="text-sm font-semibold" style={{ color: '#34d399' }}>Reserve deployed.</p>}
             {deployError && <p className="text-sm break-all" style={{ color: '#f87171' }}>Error: {deployError.message}</p>}
           </div>
